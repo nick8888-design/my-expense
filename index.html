@@ -2022,32 +2022,52 @@ async function ocrReceipt(file) {
   const apiKey = await Data.getSetting('openaiKey');
   if (!apiKey) throw new Error('请先到设置填 OpenAI API Key');
   
-  const compressed = await compressImage(file, 1024, 0.78);
+  const compressed = await compressImage(file, 1800, 0.85);
   const base64 = await fileToBase64(compressed);
   
-  const prompt = `You are reading a receipt/invoice from Malaysia. Extract the key info and return ONLY valid JSON (no markdown):
+  const prompt = `You are an expert at reading Malaysian receipts/invoices/bills. Extract the key info and return ONLY valid JSON (no markdown, no explanation):
 
 {
-  "merchant": "store name (e.g. McDonald's, Petronas, Tesco) or empty",
-  "amount": number (TOTAL amount in RM, the FINAL total user paid),
-  "date": "YYYY-MM-DD or empty",
+  "merchant": "store/business name",
+  "amount": number (the TOTAL paid in RM/MYR),
+  "date": "YYYY-MM-DD",
   "category": "餐饮 | 交通 | 购物 | 娱乐 | 账单 | 医疗 | 其他",
-  "note": "brief description of what was bought (e.g. '午餐', '加油', '日用品') or empty"
+  "note": "1-3 word description"
 }
 
-CRITICAL RULES:
-1. AMOUNT: Find the FINAL TOTAL (after tax/discount). Look for "Total", "总计", "Amount Due", "Grand Total".
-2. DATE: Malaysian format DD/MM/YYYY. "8/5/2025" = 2025-05-08. NEVER swap day/month.
-3. CATEGORY: Pick the BEST match:
-   - 餐饮: restaurants, cafes, McDonald's, KFC, Starbucks, mamak, food court, kopitiam, food delivery
-   - 交通: petrol (Petronas, Shell, Petron), Grab, taxi, parking, toll, public transport, MRT/LRT, train, bus, flight
-   - 购物: groceries (Tesco, Aeon, Lotus's, 99 Speedmart), clothing, electronics, online shopping (Shopee, Lazada)
-   - 娱乐: cinema, GSC, TGV, KTV, bowling, entertainment, video games, Netflix, Spotify
-   - 账单: utilities (TNB, Air Selangor, Indah Water), phone bills (Maxis, Digi, Celcom, Unifi), insurance, rent
-   - 医疗: pharmacy (Watsons, Guardian, Caring), hospital, clinic, dental, optical
-   - 其他: anything else (haircut, gifts, donations, fees)
-4. MERCHANT: Use the recognizable brand name, clean and short
-5. Return ONLY the JSON object, nothing else, no markdown fences`;
+⚠️ AMOUNT — THIS IS THE MOST IMPORTANT FIELD:
+- Find the FINAL TOTAL paid (after tax, after discount, after rounding).
+- Keywords (in priority order): "Grand Total" > "Total Amount" > "Amount Due" > "Total" > "总计" > "应付" > "合计"
+- IGNORE: Subtotal, Tax, Service Charge, SST, Discount lines, Cash Tendered, Change.
+- The total is usually the LARGEST number near the bottom of the receipt.
+- If receipt uses comma as decimal (like "RM 25,90"), convert to dot ("25.90").
+- If multiple totals shown, pick the one AFTER tax/SST has been added.
+- For bills with "Amount Due" and "Previous Balance", use AMOUNT DUE only (current period).
+- Return as plain number, no currency symbol, no commas. e.g. 25.90 not "RM25.90"
+
+⚠️ DATE — SECOND MOST IMPORTANT:
+- Malaysian format is usually DD/MM/YYYY or DD-MM-YYYY or DD MMM YYYY.
+- Examples: "8/5/2025" = "2025-05-08", "05-MAY-2025" = "2025-05-05", "31/12/2024" = "2024-12-31"
+- If you see day > 12, that confirms DD/MM (not US format).
+- If year is 2-digit like "25", assume 20XX (e.g. "25" → "2025").
+- If you see Chinese date like "2025年5月8日", convert to "2025-05-08".
+- If multiple dates on receipt (invoice date vs payment date), prefer the TRANSACTION/PURCHASE date.
+- If absolutely no date is visible, return empty string "".
+
+CATEGORY (pick the best match):
+- 餐饮: restaurants, cafes, McDonald's, KFC, Starbucks, mamak, food court, kopitiam, food delivery, Grab Food, Foodpanda
+- 交通: petrol (Petronas, Shell, Petron, Caltex, BHP), Grab, MyCar, taxi, parking, toll, MRT, LRT, train, bus, flight, AirAsia, MAS
+- 购物: groceries (Tesco, Aeon, Lotus's, 99 Speedmart, Mydin, Giant), clothing, electronics, Shopee, Lazada, online shopping
+- 娱乐: cinema (GSC, TGV, MBO), KTV, bowling, theme park, Netflix, Spotify, video games, Steam, PlayStation
+- 账单: utilities (TNB, Air Selangor, Indah Water, gas), phone (Maxis, Digi, Celcom, U Mobile, Unifi, TM), Astro, insurance, rent
+- 医疗: pharmacy (Watsons, Guardian, Caring, BIG Pharmacy), hospital, klinik, dental, optical, traditional medicine
+- 其他: hair salon, gifts, donations, government fees, education, anything not above
+
+MERCHANT: Clean brand name, max 20 chars. e.g. "McDonald's" not "MCD CHERAS STORE BERHAD". Remove "SDN BHD", "ENTERPRISE" suffix.
+
+NOTE: 1-3 Chinese/English words describing what it is. e.g. "午餐", "加油", "日用品", "电话费".
+
+Return ONLY the JSON object.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -2064,7 +2084,7 @@ CRITICAL RULES:
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
         ]
       }],
-      max_tokens: 500,
+      max_tokens: 800,
       temperature: 0
     })
   });
@@ -2086,14 +2106,49 @@ async function parseReceiptText(text) {
     if (clean.startsWith('```')) {
       clean = clean.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
     }
+    // 移除 GPT 偶尔加的解释文字, 只保留 {...}
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (m) clean = m[0];
+    
     const parsed = JSON.parse(clean);
-    if (parsed.merchant) result.merchant = String(parsed.merchant).trim();
-    if (parsed.amount) result.amount = parseFloat(parsed.amount) || 0;
-    if (parsed.date) result.date = String(parsed.date).trim();
+    
+    if (parsed.merchant) result.merchant = String(parsed.merchant).trim().slice(0, 50);
+    
+    // 金额: 清理字符串(去掉 RM, 逗号转点)
+    if (parsed.amount !== undefined && parsed.amount !== null) {
+      let amtStr = String(parsed.amount);
+      // 移除货币符号、空格
+      amtStr = amtStr.replace(/[^\d.,\-]/g, '');
+      // 如果有逗号但没小数点, 逗号当小数点 (欧式)
+      if (amtStr.includes(',') && !amtStr.includes('.')) {
+        amtStr = amtStr.replace(',', '.');
+      } else {
+        // 否则逗号是千分位
+        amtStr = amtStr.replace(/,/g, '');
+      }
+      const amt = parseFloat(amtStr);
+      if (!isNaN(amt) && amt > 0) result.amount = amt;
+    }
+    
+    // 日期: 验证格式 YYYY-MM-DD
+    if (parsed.date) {
+      let dt = String(parsed.date).trim();
+      // 尝试转成 YYYY-MM-DD
+      const ymd = dt.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+      const dmy = dt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if (ymd) {
+        result.date = `${ymd[1]}-${ymd[2].padStart(2,'0')}-${ymd[3].padStart(2,'0')}`;
+      } else if (dmy) {
+        result.date = `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+      } else if (dt.length === 10 && dt[4] === '-' && dt[7] === '-') {
+        result.date = dt; // 已经正确格式
+      }
+    }
+    
     if (parsed.category && CATEGORIES.includes(parsed.category)) result.category = parsed.category;
-    if (parsed.note) result.note = String(parsed.note).trim();
+    if (parsed.note) result.note = String(parsed.note).trim().slice(0, 100);
   } catch (e) {
-    console.error('parse error', e);
+    console.error('parse error', e, 'text:', text);
   }
   return result;
 }
@@ -2156,14 +2211,34 @@ async function handleImageFile(file) {
     const text = await ocrReceipt(file);
     const parsed = await parseReceiptText(text);
     
-    if (parsed.amount) document.getElementById('inAmount').value = parsed.amount.toFixed(2);
-    if (parsed.date) document.getElementById('inDate').value = parsed.date;
-    if (parsed.merchant) document.getElementById('inMerchant').value = parsed.merchant;
-    if (parsed.note) document.getElementById('inNote').value = parsed.note;
+    let filled = [];
+    if (parsed.amount) {
+      document.getElementById('inAmount').value = parsed.amount.toFixed(2);
+      filled.push('金额');
+    }
+    if (parsed.date) {
+      document.getElementById('inDate').value = parsed.date;
+      filled.push('日期');
+    } else {
+      // 没识别到日期, 自动填今天 (让用户至少有个起点)
+      document.getElementById('inDate').value = todayStr();
+    }
+    if (parsed.merchant) {
+      document.getElementById('inMerchant').value = parsed.merchant;
+      filled.push('商家');
+    }
+    if (parsed.note) {
+      document.getElementById('inNote').value = parsed.note;
+    }
     if (parsed.category) setSelectedCategory(parsed.category);
     
-    ocrStatus.className = 'ocr-status success';
-    ocrStatus.innerHTML = `✓ 识别完成 · 请检查并修改 <span style="font-style: italic; color: var(--ink-3); font-size: 11px;">scanned, please review</span>`;
+    if (filled.length === 0) {
+      ocrStatus.className = 'ocr-status error';
+      ocrStatus.innerHTML = `⚠ 识别效果不佳,请手动填写。<br><span style="font-size: 10px; color: var(--ink-3);">原始返回: ${escapeHtml(text.slice(0, 100))}</span>`;
+    } else {
+      ocrStatus.className = 'ocr-status success';
+      ocrStatus.innerHTML = `✓ 已自动填入: ${filled.join(' · ')} <span style="font-style: italic; color: var(--ink-3); font-size: 11px;">— 请核对</span>`;
+    }
   } catch (err) {
     ocrStatus.className = 'ocr-status error';
     ocrStatus.innerHTML = '✗ ' + err.message;
