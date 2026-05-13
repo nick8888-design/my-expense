@@ -1219,15 +1219,20 @@ input[type="file"] { display: none; }
   <section id="tab-bills" class="tab-content hidden">
     <div class="card">
       <div class="card-title">
-        <span>📅 计划付款</span>
-        <button id="addBillBtn" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">+ 添加</button>
+        <span>📅 账单提醒</span>
+        <div style="display: flex; gap: 6px;">
+          <button id="importBillsTxtBtn" style="background: #6366f1; color: white; border: none; padding: 6px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">📥 导入txt</button>
+          <button id="exportBillsTxtBtn" style="background: #64748b; color: white; border: none; padding: 6px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">📤 导出</button>
+          <button id="addBillBtn" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 6px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">+ 添加</button>
+        </div>
       </div>
       <div style="font-family: 'Fraunces', serif; font-style: italic; font-size: 12px; color: var(--ink-3); margin-bottom: 12px; line-height: 1.6;">
-        定期账单 / 学费 / 贷款 / 订阅 etc — 设好周期,App 会提醒到期。
+        定期账单 · 设好周期,App 提醒到期 · 点 ✓ 已付 自动 +1 周期
       </div>
+      <input type="file" id="billsTxtInput" accept=".txt,.csv" style="display: none;">
       <div id="billsList" style="display: flex; flex-direction: column; gap: 10px;"></div>
       <div id="billsEmpty" style="text-align: center; padding: 30px 16px; color: var(--ink-3); font-size: 13px; display: none;">
-        还没有账单 · 点击 + 添加
+        还没有账单 · 点击 + 添加 / 📥 导入 txt
       </div>
     </div>
   </section>
@@ -1289,6 +1294,10 @@ input[type="file"] { display: none; }
             <option value="贷款">💰 贷款</option>
             <option value="其他">📌 其他</option>
           </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">付款网址 (可选)</label>
+          <input type="url" id="billUrl" placeholder="https://..." style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
         </div>
         <div>
           <label style="font-size: 11px; color: #64748b; font-weight: 600;">备注 (可选)</label>
@@ -3344,6 +3353,8 @@ document.getElementById('bookAddBtn').addEventListener('click', async () => {
 
 // ============ Bills 计划付款 业务逻辑 ============
 let editingBillId = null;
+let pendingBillPaymentId = null;
+let pendingBillPaymentTime = 0;
 
 const BILL_CATEGORIES = {
   '居住': '🏠', '教育': '📚', '交通': '🚗', '订阅': '💳',
@@ -3398,6 +3409,7 @@ async function renderBillsList() {
       else { urgencyText = `${days} 天后`; }
     }
     const icon = BILL_CATEGORIES[b.category] || '📌';
+    const hasUrl = b.url && /^https?:\/\//i.test(b.url);
     return `
       <div class="bill-card" data-id="${b.id}" style="background: white; border: 1px solid #e2e8f0; border-left: 4px solid ${urgency}; border-radius: 10px; padding: 12px; cursor: pointer;">
         <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px;">
@@ -3411,7 +3423,10 @@ async function renderBillsList() {
             <div style="font-size: 10px; color: ${urgency}; font-weight: 600; margin-top: 2px;">${urgencyText}</div>
           </div>
         </div>
-        ${b.cycle !== 'once' ? `<button class="bill-paid-btn" data-id="${b.id}" style="margin-top: 10px; width: 100%; background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">✓ 已付,推到下个周期</button>` : ''}
+        <div style="display: flex; gap: 6px; margin-top: 10px;">
+          ${hasUrl ? `<button class="bill-pay-url-btn" data-id="${b.id}" data-url="${escapeHtml(b.url)}" style="flex: 1; background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">🔗 去付款</button>` : ''}
+          ${b.cycle !== 'once' ? `<button class="bill-paid-btn" data-id="${b.id}" style="flex: ${hasUrl ? '1' : '1'}; background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">✓ 已付,推到下个周期</button>` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -3419,8 +3434,22 @@ async function renderBillsList() {
   cont.querySelectorAll('.bill-card').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target.closest('.bill-paid-btn')) return;
+      if (e.target.closest('.bill-pay-url-btn')) return;
       const id = parseInt(el.dataset.id);
       openBillModal(id);
+    });
+  });
+  
+  // 🔗 去付款 按钮
+  cont.querySelectorAll('.bill-pay-url-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.id);
+      const url = btn.dataset.url;
+      // 记录跳出时间, 返回时弹确认框
+      pendingBillPaymentId = id;
+      pendingBillPaymentTime = Date.now();
+      window.open(url, '_blank');
     });
   });
   
@@ -3470,6 +3499,7 @@ function openBillModal(id = null) {
       document.getElementById('billCycle').value = b.cycle || 'monthly';
       document.getElementById('billDueDate').value = b.dueDate || '';
       document.getElementById('billCategory').value = b.category || '其他';
+      document.getElementById('billUrl').value = b.url || '';
       document.getElementById('billNote').value = b.note || '';
     });
   } else {
@@ -3478,6 +3508,7 @@ function openBillModal(id = null) {
     document.getElementById('billCycle').value = 'monthly';
     document.getElementById('billDueDate').value = todayStr();
     document.getElementById('billCategory').value = '其他';
+    document.getElementById('billUrl').value = '';
     document.getElementById('billNote').value = '';
   }
   document.getElementById('billModal').style.display = 'flex';
@@ -3500,6 +3531,7 @@ document.getElementById('billSaveBtn').addEventListener('click', async () => {
     cycle: document.getElementById('billCycle').value,
     dueDate: document.getElementById('billDueDate').value,
     category: document.getElementById('billCategory').value,
+    url: document.getElementById('billUrl').value.trim(),
     note: document.getElementById('billNote').value.trim()
   };
   
@@ -3527,6 +3559,201 @@ document.getElementById('billDeleteBtn').addEventListener('click', async () => {
   await renderBillsList();
   await renderRemindersBanner();
   schedulePush();
+});
+
+// ============ TXT 导入导出 (像 server tracker) ============
+
+// 导出 txt
+document.getElementById('exportBillsTxtBtn').addEventListener('click', async () => {
+  const bills = await BillsData.getAll();
+  if (bills.length === 0) { showToast('还没有账单'); return; }
+  
+  // 格式: 名称 | 金额 | 周期 | 到期日 | 分类 | 网址 | 备注
+  const lines = ['# 账单清单 (用 | 分隔,可手动编辑)'];
+  lines.push('# 名称 | 金额 | 周期 | 到期日 | 分类 | 网址 | 备注');
+  lines.push('# 周期: monthly/quarterly/yearly/weekly/once');
+  lines.push('# 分类: 居住/教育/交通/订阅/保险/贷款/其他');
+  lines.push('');
+  for (const b of bills) {
+    lines.push([
+      b.name || '',
+      (b.amount || 0).toFixed(2),
+      b.cycle || 'monthly',
+      b.dueDate || '',
+      b.category || '其他',
+      b.url || '',
+      b.note || ''
+    ].join(' | '));
+  }
+  const txt = lines.join('\n');
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bills_${todayStr()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`✓ 已导出 ${bills.length} 条`);
+});
+
+// 导入 txt
+document.getElementById('importBillsTxtBtn').addEventListener('click', () => {
+  document.getElementById('billsTxtInput').click();
+});
+
+document.getElementById('billsTxtInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const text = await file.text();
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  
+  if (lines.length === 0) {
+    showToast('文件没有有效行');
+    e.target.value = '';
+    return;
+  }
+  
+  // 自动检测分隔符: | / Tab / 逗号
+  let separator = '|';
+  if (lines[0].includes('\t')) separator = '\t';
+  else if (lines[0].includes('|')) separator = '|';
+  else if (lines[0].includes(',')) separator = ',';
+  
+  const parsed = [];
+  const errors = [];
+  const validCycles = ['monthly', 'quarterly', 'yearly', 'weekly', 'once'];
+  const validCategories = ['居住', '教育', '交通', '订阅', '保险', '贷款', '其他'];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const parts = lines[i].split(separator).map(p => p.trim());
+    
+    if (parts.length < 2) {
+      errors.push(`第 ${i + 1} 行: 列太少`);
+      continue;
+    }
+    
+    const name = parts[0];
+    const amount = parseFloat(parts[1]);
+    
+    if (!name) { errors.push(`第 ${i + 1} 行: 没有名称`); continue; }
+    if (isNaN(amount) || amount < 0) { errors.push(`第 ${i + 1} 行: 金额无效 "${parts[1]}"`); continue; }
+    
+    let cycle = (parts[2] || 'monthly').toLowerCase();
+    if (!validCycles.includes(cycle)) {
+      // 中文转英文
+      const cycleMap = { '月': 'monthly', '月度': 'monthly', '每月': 'monthly',
+                         '季': 'quarterly', '季度': 'quarterly', '每季': 'quarterly',
+                         '年': 'yearly', '年度': 'yearly', '每年': 'yearly',
+                         '周': 'weekly', '每周': 'weekly',
+                         '一次': 'once', '只一次': 'once' };
+      cycle = cycleMap[parts[2]] || 'monthly';
+    }
+    
+    let dueDate = parts[3] || todayStr();
+    // 转换 YYYY/MM/DD 或 DD/MM/YYYY
+    const ymd = dueDate.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    const dmy = dueDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (ymd) dueDate = `${ymd[1]}-${ymd[2].padStart(2,'0')}-${ymd[3].padStart(2,'0')}`;
+    else if (dmy) dueDate = `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+    
+    const category = validCategories.includes(parts[4]) ? parts[4] : '其他';
+    const url = parts[5] || '';
+    const note = parts[6] || '';
+    
+    parsed.push({ name, amount, cycle, dueDate, category, url, note });
+  }
+  
+  if (parsed.length === 0) {
+    showToast(`✗ 没有解析成功的行` + (errors.length ? ` (${errors.length} 个错误)` : ''));
+    e.target.value = '';
+    return;
+  }
+  
+  // 确认导入
+  const mode = confirm(`解析到 ${parsed.length} 条账单${errors.length ? ` (${errors.length} 个错误已跳过)` : ''}\n\n点【确定】= 追加 (保留现有)\n点【取消】查看选项`);
+  
+  let importMode = mode ? 'append' : 'replace';
+  
+  if (!mode) {
+    const replace = confirm(`点【确定】= 替换 (删除所有现有账单 + 导入新的)\n点【取消】= 不导入`);
+    if (!replace) {
+      e.target.value = '';
+      return;
+    }
+  }
+  
+  // 执行
+  if (importMode === 'replace') {
+    await BillsData.clearAll();
+  }
+  
+  let added = 0;
+  for (const b of parsed) {
+    await BillsData.add(b);
+    added++;
+  }
+  
+  e.target.value = '';
+  showToast(`✓ 已导入 ${added} 条 (${importMode === 'replace' ? '替换' : '追加'})`);
+  await renderBillsList();
+  await renderRemindersBanner();
+  schedulePush();
+});
+
+// ============ 智能返回检测: 付款后弹确认框 ============
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!pendingBillPaymentId) return;
+  
+  const elapsed = Date.now() - pendingBillPaymentTime;
+  // 至少 20 秒,最多 30 分钟之内
+  if (elapsed < 20000 || elapsed > 30 * 60 * 1000) {
+    if (elapsed > 30 * 60 * 1000) {
+      pendingBillPaymentId = null;
+      pendingBillPaymentTime = 0;
+    }
+    return;
+  }
+  
+  const id = pendingBillPaymentId;
+  pendingBillPaymentId = null;
+  pendingBillPaymentTime = 0;
+  
+  const all = await BillsData.getAll();
+  const bill = all.find(b => b.id === id);
+  if (!bill) return;
+  
+  // 弹自定义确认框
+  setTimeout(async () => {
+    const paid = confirm(`💰 付款完成了吗?\n\n${bill.name} · RM ${(bill.amount || 0).toFixed(2)}\n\n【确定】= ✓ 已付款,推到下个周期\n【取消】= 还没付`);
+    if (!paid) return;
+    
+    // 记到流水
+    const today = todayStr();
+    if (currentBookId) {
+      await Data.add({
+        date: today,
+        amount: bill.amount,
+        category: bill.category,
+        note: `[账单] ${bill.name}`,
+        bookId: currentBookId
+      });
+    }
+    
+    // 推到下个周期 (若非 once)
+    if (bill.cycle !== 'once') {
+      bill.dueDate = addBillPeriod(bill.dueDate || today, bill.cycle);
+    }
+    bill.lastPaidDate = today;
+    await BillsData.update(bill);
+    
+    showToast(`✓ 已付,下次 ${bill.dueDate || '一次性'}`);
+    await renderBillsList();
+    await renderRemindersBanner();
+    if (typeof renderRecords === 'function') await renderRecords();
+    schedulePush();
+  }, 300);
 });
 
 // ============ Games 游戏活动 业务逻辑 ============
