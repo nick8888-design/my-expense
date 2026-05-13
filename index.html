@@ -831,15 +831,19 @@ async function pullFromVPS() {
     });
     if (!res.ok) {
       if (res.status === 401) {
+        // token 失效 - 只清 token,不立刻踢人
         localStorage.removeItem(STORAGE_TOKEN);
-        showLoginPage();
+        setSyncStatus('error', '登录已过期');
+        showToast('登录已过期,请到设置重新登录');
+        return null;
       }
-      throw new Error('Pull failed');
+      throw new Error('Pull failed: ' + res.status);
     }
     const data = await res.json();
     setSyncStatus('', '已同步');
     return data;
   } catch (e) {
+    console.error('pullFromVPS:', e);
     setSyncStatus('error', '同步失败');
     return null;
   }
@@ -865,12 +869,14 @@ async function pushToVPS() {
     if (!res.ok) {
       if (res.status === 401) {
         localStorage.removeItem(STORAGE_TOKEN);
-        showLoginPage();
+        setSyncStatus('error', '登录已过期');
+        return;
       }
-      throw new Error('Push failed');
+      throw new Error('Push failed: ' + res.status);
     }
     setSyncStatus('', '已同步');
   } catch (e) {
+    console.error('pushToVPS:', e);
     setSyncStatus('error', '同步失败');
   }
 }
@@ -901,21 +907,51 @@ function hideLoginPage() {
 document.getElementById('loginBtn').addEventListener('click', async () => {
   const pwd = document.getElementById('loginPwd').value.trim();
   const msg = document.getElementById('loginMsg');
+  const btn = document.getElementById('loginBtn');
+  msg.style.color = 'var(--warn)';
   msg.textContent = '';
   if (!pwd) { msg.textContent = '请输入密码'; return; }
+  
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+  
   try {
     const res = await fetch(`${API_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pwd })
     });
-    if (!res.ok) throw new Error('密码错误');
+    
+    if (!res.ok) {
+      if (res.status === 401) throw new Error('密码错误');
+      throw new Error(`登录失败 (${res.status})`);
+    }
+    
     const data = await res.json();
+    if (!data.token) throw new Error('服务器未返回 token');
+    
     localStorage.setItem(STORAGE_TOKEN, data.token);
+    msg.style.color = 'var(--green)';
+    msg.textContent = '✓ 登录成功,正在加载...';
+    
+    // 等下一帧再进入主界面 - 避免跟初始化的 fetch 冲突
+    await new Promise(r => setTimeout(r, 300));
+    
     hideLoginPage();
-    await init();
+    
+    try {
+      await init();
+    } catch (initErr) {
+      console.error('Init error:', initErr);
+      // init 失败不要踢回登录页,显示主界面 + 提示
+      showToast('数据加载失败,可手动同步');
+    }
   } catch (e) {
-    msg.textContent = '登录失败: ' + e.message;
+    msg.style.color = 'var(--warn)';
+    msg.textContent = '✗ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登录';
   }
 });
 
@@ -1524,24 +1560,36 @@ async function renderAll() {
 // ============ 启动 ============
 async function init() {
   await openDB();
-  // 拉取云端数据
-  const cloud = await pullFromVPS();
-  if (cloud) {
-    await applyCloudData(cloud);
+  await renderAll();  // 先用本地数据渲染
+  
+  // 再尝试拉云端 (失败不影响)
+  try {
+    const cloud = await pullFromVPS();
+    if (cloud) {
+      await applyCloudData(cloud);
+      await renderAll();
+    }
+  } catch (e) {
+    console.error('Init cloud pull failed:', e);
   }
-  await renderAll();
   
   // 每分钟刷新倒计时
   setInterval(renderAll, 60 * 1000);
 }
 
 (async () => {
-  const token = localStorage.getItem(STORAGE_TOKEN);
-  if (!token) {
-    showLoginPage();
-  } else {
+  try {
+    const token = localStorage.getItem(STORAGE_TOKEN);
+    if (!token) {
+      showLoginPage();
+    } else {
+      hideLoginPage();
+      await init();
+    }
+  } catch (e) {
+    console.error('Startup error:', e);
+    // 即使启动错也别卡死,显示主界面让用户能用本地数据
     hideLoginPage();
-    await init();
   }
 })();
 </script>
