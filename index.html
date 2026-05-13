@@ -1038,12 +1038,40 @@ input[type="file"] { display: none; }
         <div class="text">批量上传 · Batch Upload</div>
         <div class="hint">一次选多张 receipt 自动识别保存</div>
       </label>
+      <label class="upload-tile" for="statementInput" style="display: block; padding: 18px 14px; margin-bottom: 6px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(99, 102, 241, 0.08));">
+        <span class="icon" style="font-size: 24px;">📑</span>
+        <div class="text">扫描银行月结单 · Bank Statement</div>
+        <div class="hint">一张图识别多笔交易,核对后批量加入</div>
+      </label>
       <input type="file" id="cameraInput" accept="image/*" capture="environment">
       <input type="file" id="galleryInput" accept="image/*">
       <input type="file" id="batchInput" accept="image/*" multiple>
+      <input type="file" id="statementInput" accept="image/*" multiple>
       <div id="ocrStatus"></div>
       <div id="batchProgress" class="hidden"></div>
+      <div id="statementProgress" class="hidden" style="margin-top: 12px;"></div>
       <img id="previewImg" class="hidden" alt="">
+    </div>
+
+    <!-- 月结单交易预览 Modal -->
+    <div id="statementReviewModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 10px;">
+      <div style="background: white; border-radius: 14px; max-width: 500px; width: 100%; max-height: 92vh; display: flex; flex-direction: column;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0;">
+          <div style="font-weight: 700; font-size: 16px; color: #0f172a; margin-bottom: 4px;">📑 月结单识别结果</div>
+          <div style="font-size: 11px; color: #64748b;" id="statementReviewInfo">识别中...</div>
+        </div>
+        <div id="statementReviewList" style="flex: 1; overflow-y: auto; padding: 8px 12px;"></div>
+        <div style="padding: 12px 16px; border-top: 1px solid #e2e8f0; background: #f8fafc;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 12px;">
+            <button id="statementToggleAll" style="background: none; border: 1px solid #cbd5e1; color: #475569; padding: 6px 10px; border-radius: 6px; font-size: 11px; cursor: pointer;">全选 / 取消</button>
+            <span id="statementSelectedTotal" style="font-weight: 700; color: #0f172a;">选中: 0 笔</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="statementCancelBtn" style="flex: 1; background: #f1f5f9; border: none; padding: 11px; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit;">取消</button>
+            <button id="statementImportBtn" style="flex: 2; background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border: none; padding: 11px; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit;">添加选中的</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 记账表单 -->
@@ -2384,10 +2412,266 @@ batchInput.addEventListener('change', async (e) => {
   
   batchInput.value = '';
   showToast(`✓ 已记入 ${successCount} 笔`);
+  
+  // 清空 + 记一笔 表单 (避免残留单张扫描内容造成混淆)
+  document.getElementById('inAmount').value = '';
+  document.getElementById('inDate').value = todayStr();
+  document.getElementById('inMerchant').value = '';
+  document.getElementById('inNote').value = '';
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  currentPhotoBase64 = null;
+  previewImg.src = '';
+  previewImg.classList.add('hidden');
 });
 
 previewImg.addEventListener('click', () => {
   if (previewImg.src) openImageViewer(previewImg.src);
+});
+
+// ============ 月结单扫描 ============
+let statementTransactions = []; // 当前识别到的所有交易
+
+async function ocrBankStatement(file) {
+  const apiKey = await Data.getSetting('openaiKey');
+  if (!apiKey) throw new Error('请先到设置填 OpenAI API Key');
+  
+  // 月结单字密集,用更高分辨率
+  const compressed = await compressImage(file, 2200, 0.9);
+  const base64 = await fileToBase64(compressed);
+  
+  const prompt = `You are reading a Malaysian bank/credit card monthly statement. Extract ALL transactions/charges and return JSON.
+
+Return ONLY this JSON shape (no markdown, no explanation):
+
+{
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD",
+      "description": "merchant or description (clean, max 40 chars)",
+      "amount": number (positive number),
+      "category": "餐饮 | 交通 | 购物 | 娱乐 | 账单 | 医疗 | 其他",
+      "is_income": false
+    }
+  ]
+}
+
+⚠️ RULES:
+1. Include EVERY transaction line you can see on the statement.
+2. AMOUNT: Always positive number. Use is_income=true for incoming money (transfers in, refunds, salary, cashback), false for outgoing (purchases, withdrawals, bills).
+3. DATE: Convert to YYYY-MM-DD. If only DD/MM is shown, use the statement period's year. If year unclear, use current year.
+4. DESCRIPTION: Clean merchant name. Remove transaction IDs, reference numbers. e.g. "PETRONAS BANGSAR" → "Petronas Bangsar". Remove "POS DEBIT", "VISA", reference codes.
+5. CATEGORY: Auto-pick based on merchant:
+   - 餐饮: McDonald's, KFC, Starbucks, restaurant names, food delivery, mamak, cafe
+   - 交通: Petronas, Shell, Petron, Caltex, Grab, taxi, parking, toll, airline
+   - 购物: Tesco, Aeon, Lotus's, 99 Speedmart, Mydin, Giant, Shopee, Lazada, retail stores
+   - 娱乐: GSC, TGV, Netflix, Spotify, cinema, gaming, KTV
+   - 账单: TNB, Air Selangor, Indah Water, Maxis, Digi, Celcom, U Mobile, Unifi, TM, Astro, insurance
+   - 医疗: Watsons, Guardian, BIG Pharmacy, hospital, klinik, dental
+   - 其他: bank fees, transfers, ATM withdrawal, anything not above
+6. SKIP: opening balance, closing balance, statement summary rows, page totals. ONLY include actual transactions.
+7. If you can't read a row clearly, skip it (better to miss one than guess wrong).
+
+Return the JSON.`;
+  
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+        ]
+      }],
+      max_tokens: 4000,
+      temperature: 0
+    })
+  });
+  
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`识别失败: ${res.status}. ${err.slice(0, 200)}`);
+  }
+  
+  const json = await res.json();
+  const text = json.choices?.[0]?.message?.content || '';
+  
+  // 解析
+  let clean = text.trim();
+  if (clean.startsWith('```')) {
+    clean = clean.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+  }
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+  if (jsonMatch) clean = jsonMatch[0];
+  
+  try {
+    const parsed = JSON.parse(clean);
+    return parsed.transactions || [];
+  } catch (e) {
+    throw new Error('GPT 返回格式错误,请重试或换张更清晰的图');
+  }
+}
+
+document.getElementById('statementInput').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  
+  if (!confirm(`将识别 ${files.length} 张月结单上的所有交易。每张约需 10-15 秒。\n\n识别后会显示交易列表,你可以核对并选择要导入哪些。\n\n开始?`)) {
+    e.target.value = '';
+    return;
+  }
+  
+  const progressEl = document.getElementById('statementProgress');
+  progressEl.classList.remove('hidden');
+  progressEl.innerHTML = '<div class="ocr-status loading"><span class="spinner"></span>识别月结单中... (1/' + files.length + ')</div>';
+  
+  statementTransactions = [];
+  let totalParsed = 0;
+  let errCount = 0;
+  
+  for (let i = 0; i < files.length; i++) {
+    progressEl.innerHTML = `<div class="ocr-status loading"><span class="spinner"></span>识别月结单中... (${i + 1}/${files.length}) · 已找到 ${totalParsed} 笔</div>`;
+    try {
+      const txs = await ocrBankStatement(files[i]);
+      for (const tx of txs) {
+        // 简单清洗
+        let amount = parseFloat(tx.amount) || 0;
+        if (amount <= 0) continue;
+        let date = String(tx.date || '').trim();
+        const dmy = date.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (dmy) date = `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = todayStr();
+        
+        statementTransactions.push({
+          date,
+          description: String(tx.description || '').slice(0, 60),
+          amount,
+          category: CATEGORIES.includes(tx.category) ? tx.category : '其他',
+          is_income: !!tx.is_income,
+          selected: !tx.is_income  // 默认只勾选支出
+        });
+        totalParsed++;
+      }
+    } catch (err) {
+      errCount++;
+      console.error('Statement OCR error', err);
+    }
+  }
+  
+  progressEl.classList.add('hidden');
+  e.target.value = '';
+  
+  if (statementTransactions.length === 0) {
+    showToast('✗ 未识别到任何交易' + (errCount > 0 ? ` (${errCount} 张失败)` : ''));
+    return;
+  }
+  
+  // 排序: 按日期降序
+  statementTransactions.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  
+  // 打开预览 modal
+  renderStatementReview();
+  document.getElementById('statementReviewModal').style.display = 'flex';
+});
+
+const CAT_ICONS_LOCAL = { '餐饮': '🍜', '交通': '🚗', '购物': '🛒', '娱乐': '🎬', '账单': '💡', '医疗': '💊', '其他': '✨' };
+
+function renderStatementReview() {
+  const list = document.getElementById('statementReviewList');
+  const info = document.getElementById('statementReviewInfo');
+  
+  const expense = statementTransactions.filter(t => !t.is_income);
+  const income = statementTransactions.filter(t => t.is_income);
+  const totalExpense = expense.reduce((s, t) => s + t.amount, 0);
+  const totalIncome = income.reduce((s, t) => s + t.amount, 0);
+  
+  info.innerHTML = `共 ${statementTransactions.length} 笔 · 支出 ${expense.length} 笔 (RM ${totalExpense.toFixed(2)})${income.length > 0 ? ` · 收入 ${income.length} 笔 (RM ${totalIncome.toFixed(2)}) <span style="color: #f59e0b;">— 默认不勾</span>` : ''}`;
+  
+  list.innerHTML = statementTransactions.map((tx, idx) => `
+    <label class="stmt-row" data-idx="${idx}" style="display: flex; align-items: center; gap: 8px; padding: 9px 8px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 12px; ${tx.is_income ? 'background: #fffbeb;' : ''}">
+      <input type="checkbox" data-idx="${idx}" ${tx.selected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
+      <div style="flex: 1; min-width: 0;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 14px;">${CAT_ICONS_LOCAL[tx.category] || '✨'}</span>
+          <span style="font-weight: 600; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(tx.description)}</span>
+        </div>
+        <div style="font-size: 10px; color: #94a3b8; margin-top: 1px;">${tx.date} · ${tx.category}${tx.is_income ? ' · 收入' : ''}</div>
+      </div>
+      <div style="font-weight: 700; color: ${tx.is_income ? '#10b981' : '#0f172a'}; font-family: 'JetBrains Mono', monospace; font-size: 13px; flex-shrink: 0;">
+        ${tx.is_income ? '+' : ''}RM ${tx.amount.toFixed(2)}
+      </div>
+    </label>
+  `).join('');
+  
+  // 复选框监听
+  list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const idx = parseInt(cb.dataset.idx);
+      statementTransactions[idx].selected = cb.checked;
+      updateStatementSelectedTotal();
+    });
+  });
+  
+  updateStatementSelectedTotal();
+}
+
+function updateStatementSelectedTotal() {
+  const selected = statementTransactions.filter(t => t.selected);
+  const total = selected.reduce((s, t) => s + t.amount, 0);
+  document.getElementById('statementSelectedTotal').textContent = `选中: ${selected.length} 笔 · RM ${total.toFixed(2)}`;
+}
+
+document.getElementById('statementToggleAll').addEventListener('click', () => {
+  // 检查是否全选了
+  const allSelected = statementTransactions.every(t => t.selected);
+  statementTransactions.forEach(t => { t.selected = !allSelected; });
+  renderStatementReview();
+});
+
+document.getElementById('statementCancelBtn').addEventListener('click', () => {
+  document.getElementById('statementReviewModal').style.display = 'none';
+  statementTransactions = [];
+});
+
+document.getElementById('statementImportBtn').addEventListener('click', async () => {
+  const selected = statementTransactions.filter(t => t.selected);
+  if (selected.length === 0) { showToast('未选中任何交易'); return; }
+  
+  if (!confirm(`确定导入 ${selected.length} 笔到账本?`)) return;
+  
+  const btn = document.getElementById('statementImportBtn');
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+  
+  let added = 0;
+  for (const tx of selected) {
+    // 收入用负数(或者你可以加一个 type 字段, 这里先用负数)
+    const amount = tx.is_income ? -tx.amount : tx.amount;
+    await Data.add({
+      date: tx.date,
+      amount,
+      merchant: tx.description,
+      note: tx.is_income ? '[月结单·收入]' : '[月结单]',
+      category: tx.category,
+      photo: null,
+      createdAt: Date.now()
+    });
+    added++;
+  }
+  
+  btn.disabled = false;
+  btn.textContent = '添加选中的';
+  document.getElementById('statementReviewModal').style.display = 'none';
+  statementTransactions = [];
+  showToast(`✓ 已导入 ${added} 笔`);
+  
+  // 跳到流水 tab
+  switchTab('records');
 });
 
 // Save button
