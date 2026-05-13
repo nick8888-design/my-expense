@@ -916,11 +916,14 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
   btn.textContent = '登录中...';
   
   try {
+    console.log('[LOGIN] Sending login request...');
     const res = await fetch(`${API_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pwd })
     });
+    
+    console.log('[LOGIN] Response status:', res.status);
     
     if (!res.ok) {
       if (res.status === 401) throw new Error('密码错误');
@@ -928,25 +931,30 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
     }
     
     const data = await res.json();
+    console.log('[LOGIN] Got data:', { hasToken: !!data.token });
+    
     if (!data.token) throw new Error('服务器未返回 token');
     
     localStorage.setItem(STORAGE_TOKEN, data.token);
+    console.log('[LOGIN] Token saved');
+    
     msg.style.color = 'var(--green)';
     msg.textContent = '✓ 登录成功,正在加载...';
     
-    // 等下一帧再进入主界面 - 避免跟初始化的 fetch 冲突
     await new Promise(r => setTimeout(r, 300));
     
     hideLoginPage();
+    console.log('[LOGIN] Main app shown');
     
     try {
       await init();
+      console.log('[LOGIN] Init done');
     } catch (initErr) {
-      console.error('Init error:', initErr);
-      // init 失败不要踢回登录页,显示主界面 + 提示
+      console.error('[LOGIN] Init error:', initErr);
       showToast('数据加载失败,可手动同步');
     }
   } catch (e) {
+    console.error('[LOGIN] Error:', e);
     msg.style.color = 'var(--warn)';
     msg.textContent = '✗ ' + e.message;
   } finally {
@@ -1592,6 +1600,28 @@ async function init() {
     hideLoginPage();
   }
 })();
+
+// ============ Service Worker ============
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      // 清掉所有旧版本缓存 (但不影响当前 session)
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        for (const k of keys) {
+          if (!k.includes('v3-2026-05-13')) {
+            await caches.delete(k);
+          }
+        }
+      }
+      
+      // 注册新 SW
+      await navigator.serviceWorker.register('./sw.js');
+    } catch (e) {
+      console.error('SW setup error:', e);
+    }
+  });
+}
 </script>
 </body>
 </html>
