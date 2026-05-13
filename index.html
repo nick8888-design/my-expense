@@ -945,6 +945,32 @@ input[type="file"] { display: none; }
 </head>
 <body>
 
+<!-- 登录页 -->
+<div id="loginScreen" style="display: none; position: fixed; inset: 0; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); z-index: 9999; align-items: center; justify-content: center; padding: 20px;">
+  <div style="background: white; padding: 30px 24px; border-radius: 16px; box-shadow: 0 10px 40px rgba(15, 23, 42, 0.15); max-width: 380px; width: 100%;">
+    <div style="text-align: center; margin-bottom: 20px;">
+      <div style="font-size: 48px; margin-bottom: 8px;">💰</div>
+      <h2 style="font-size: 20px; font-weight: 700; color: #92400e; margin-bottom: 4px;">我的日常账本</h2>
+      <div style="font-size: 12px; color: #94a3b8;">输入密码同步你的数据</div>
+    </div>
+    
+    <div style="margin-bottom: 14px;">
+      <label style="display: block; font-size: 11px; color: #475569; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 6px; font-weight: 600;">密码</label>
+      <div style="position: relative;">
+        <input type="password" id="loginPasswordInput" placeholder="输入密码" autocomplete="current-password" style="width: 100%; background: white; border: 1px solid #cbd5e1; color: #0f172a; padding: 12px 40px 12px 14px; font-size: 14px; border-radius: 8px; outline: none;">
+        <button type="button" id="loginShowPwdBtn" style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; padding: 6px 8px; font-size: 16px; color: #94a3b8; border-radius: 4px;">👁️</button>
+      </div>
+      <div id="loginError" style="color: #ef4444; font-size: 12px; margin-top: 8px; display: none;"></div>
+    </div>
+    
+    <button id="loginSubmitBtn" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 12px 20px; border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);">登录</button>
+    
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.5;">
+      数据存储在: <span id="loginServerInfo" style="font-family: 'JetBrains Mono', monospace; color: #475569;">配置中...</span>
+    </div>
+  </div>
+</div>
+
 <div id="app">
 
   <!-- Header -->
@@ -952,7 +978,11 @@ input[type="file"] { display: none; }
     <h1>My Daily Ledger</h1>
     <div class="zh-title">日常账本</div>
     <div class="date" id="todayLine"></div>
+    <div id="syncIndicator" style="display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; margin-top: 4px;"></div>
   </header>
+
+  <!-- 集中提醒栏 -->
+  <div id="remindersBanner" style="display: none; margin: 10px; padding: 10px 12px; background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 10px; font-size: 12px; color: #78350f;"></div>
 
   <!-- 账本切换器 -->
   <div class="book-switcher" id="bookSwitcher">
@@ -973,10 +1003,12 @@ input[type="file"] { display: none; }
   </div>
 
   <!-- Tabs -->
-  <div class="tabs">
+  <div class="tabs" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
     <button class="tab active" data-tab="add">+ 记一笔</button>
     <button class="tab" data-tab="records">流水</button>
     <button class="tab" data-tab="stats">统计</button>
+    <button class="tab" data-tab="bills">📅 账单</button>
+    <button class="tab" data-tab="games">🎮 游戏</button>
     <button class="tab" data-tab="settings">设置</button>
   </div>
 
@@ -1161,8 +1193,158 @@ input[type="file"] { display: none; }
     </div>
   </section>
 
+  <!-- ============ BILLS TAB - 计划付款 ============ -->
+  <section id="tab-bills" class="tab-content hidden">
+    <div class="card">
+      <div class="card-title">
+        <span>📅 计划付款</span>
+        <button id="addBillBtn" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">+ 添加</button>
+      </div>
+      <div style="font-family: 'Fraunces', serif; font-style: italic; font-size: 12px; color: var(--ink-3); margin-bottom: 12px; line-height: 1.6;">
+        定期账单 / 学费 / 贷款 / 订阅 etc — 设好周期,App 会提醒到期。
+      </div>
+      <div id="billsList" style="display: flex; flex-direction: column; gap: 10px;"></div>
+      <div id="billsEmpty" style="text-align: center; padding: 30px 16px; color: var(--ink-3); font-size: 13px; display: none;">
+        还没有账单 · 点击 + 添加
+      </div>
+    </div>
+  </section>
+  
+  <!-- ============ GAMES TAB - 游戏活动 ============ -->
+  <section id="tab-games" class="tab-content hidden">
+    <div class="card">
+      <div class="card-title">
+        <span>🎮 游戏活动</span>
+        <button id="addGameBtn" style="background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">+ 添加</button>
+      </div>
+      <div style="font-family: 'Fraunces', serif; font-style: italic; font-size: 12px; color: var(--ink-3); margin-bottom: 12px; line-height: 1.6;">
+        重复活动时间表 — 每天/每周/每月 固定时间提醒。
+      </div>
+      <div id="gamesList" style="display: flex; flex-direction: column; gap: 10px;"></div>
+      <div id="gamesEmpty" style="text-align: center; padding: 30px 16px; color: var(--ink-3); font-size: 13px; display: none;">
+        还没有游戏活动 · 点击 + 添加
+      </div>
+    </div>
+  </section>
+  
+  <!-- ============ Bill 编辑 Modal ============ -->
+  <div id="billModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: white; border-radius: 14px; padding: 20px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto;">
+      <div style="font-weight: 700; font-size: 16px; margin-bottom: 14px;" id="billModalTitle">添加账单</div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">名称</label>
+          <input type="text" id="billName" placeholder="如:学费 / 房贷 / Netflix" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <div style="flex: 1;">
+            <label style="font-size: 11px; color: #64748b; font-weight: 600;">金额 (RM)</label>
+            <input type="number" id="billAmount" placeholder="0.00" step="0.01" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+          </div>
+          <div style="flex: 1;">
+            <label style="font-size: 11px; color: #64748b; font-weight: 600;">周期</label>
+            <select id="billCycle" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+              <option value="monthly">每月</option>
+              <option value="quarterly">每季</option>
+              <option value="yearly">每年</option>
+              <option value="weekly">每周</option>
+              <option value="once">一次性</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">下次到期日</label>
+          <input type="date" id="billDueDate" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">分类</label>
+          <select id="billCategory" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+            <option value="居住">🏠 居住</option>
+            <option value="教育">📚 教育</option>
+            <option value="交通">🚗 交通</option>
+            <option value="订阅">💳 订阅</option>
+            <option value="保险">🛡️ 保险</option>
+            <option value="贷款">💰 贷款</option>
+            <option value="其他">📌 其他</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">备注 (可选)</label>
+          <input type="text" id="billNote" placeholder="" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button id="billDeleteBtn" style="flex: 0 0 auto; background: #fee2e2; color: #b91c1c; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; display: none;">删除</button>
+        <button id="billCancelBtn" style="flex: 1; background: #f1f5f9; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: 600;">取消</button>
+        <button id="billSaveBtn" style="flex: 1; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: 600;">保存</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- ============ Game 编辑 Modal ============ -->
+  <div id="gameModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: white; border-radius: 14px; padding: 20px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto;">
+      <div style="font-weight: 700; font-size: 16px; margin-bottom: 14px;" id="gameModalTitle">添加游戏活动</div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">游戏名</label>
+          <input type="text" id="gameName" placeholder="如:原神 / FIFA Mobile" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">活动名</label>
+          <input type="text" id="gameEventName" placeholder="如:体力刷新 / 周本重置 / VS赛" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">频率</label>
+          <select id="gameFreq" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+            <option value="daily">每天</option>
+            <option value="weekly">每周</option>
+            <option value="monthly">每月</option>
+          </select>
+        </div>
+        <div id="gameWeekdayBlock" style="display: none;">
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">星期几</label>
+          <select id="gameWeekday" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+            <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="0">周日</option>
+          </select>
+        </div>
+        <div id="gameDayOfMonthBlock" style="display: none;">
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">每月几号</label>
+          <input type="number" id="gameDayOfMonth" min="1" max="31" value="1" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">时间 (HH:MM)</label>
+          <input type="time" id="gameTime" value="20:00" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #64748b; font-weight: 600;">备注 (可选)</label>
+          <input type="text" id="gameNote" placeholder="" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;">
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button id="gameDeleteBtn" style="flex: 0 0 auto; background: #fee2e2; color: #b91c1c; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; display: none;">删除</button>
+        <button id="gameCancelBtn" style="flex: 1; background: #f1f5f9; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: 600;">取消</button>
+        <button id="gameSaveBtn" style="flex: 1; background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: 600;">保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ SETTINGS TAB ============ -->
   <section id="tab-settings" class="tab-content hidden">
+    <!-- 云同步 -->
+    <div class="card" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(217, 119, 6, 0.04)); border: 1px solid rgba(245, 158, 11, 0.3);">
+      <div class="card-title">
+        <span>☁️ 云同步</span>
+      </div>
+      <div style="font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-bottom: 10px;">
+        <div>服务器: <span style="font-family: 'JetBrains Mono', monospace;">nick-vps.duckdns.org (HTTPS)</span></div>
+        <div>状态: <span id="syncDetailStatus" style="font-family: 'JetBrains Mono', monospace;">检查中...</span></div>
+        <div>上次同步: <span id="syncDetailLast" style="font-family: 'JetBrains Mono', monospace;">—</span></div>
+      </div>
+      <button class="btn" id="syncNowBtn" style="margin-bottom: 6px;">🔄 立即同步</button>
+      <button class="btn" id="logoutBtn" style="background: #fee2e2; color: #b91c1c;">🚪 退出登录</button>
+    </div>
+    
     <div class="card">
       <div class="card-title">
         <span>🔑 OpenAI API Key</span>
@@ -1233,9 +1415,231 @@ input[type="file"] { display: none; }
 <div class="toast" id="toast"></div>
 
 <script>
+// ========== VPS 同步配置 ==========
+const API_URL = 'https://nick-vps.duckdns.org';
+const APP_NAME = 'expense';  // 跟 Server Tracker 区分
+
+function getToken() { return localStorage.getItem('vps_token') || ''; }
+function setToken(t) { localStorage.setItem('vps_token', t); }
+function clearToken() { localStorage.removeItem('vps_token'); }
+
+let syncStatus = { state: 'idle', lastSync: 0, error: '' };
+function setSyncStatus(state, error = '') {
+  syncStatus.state = state;
+  if (state === 'synced') syncStatus.lastSync = Date.now();
+  syncStatus.error = error;
+  updateSyncIndicator();
+}
+function updateSyncIndicator() {
+  const el = document.getElementById('syncIndicator');
+  if (!el) return;
+  const map = {
+    idle: { text: '已同步', color: '#94a3b8', dot: '#10b981' },
+    syncing: { text: '同步中...', color: '#3b82f6', dot: '#3b82f6' },
+    synced: { text: '✓ 已同步', color: '#10b981', dot: '#10b981' },
+    error: { text: '⚠ 失败', color: '#ef4444', dot: '#ef4444' },
+    offline: { text: '⚠ 离线', color: '#f59e0b', dot: '#f59e0b' }
+  };
+  const s = map[syncStatus.state] || map.idle;
+  el.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${s.dot}; margin-right: 4px;"></span><span style="color: ${s.color}; font-size: 10px;">${s.text}</span>`;
+}
+
+// 拉云端所有数据 (expenses + bills + games + books + settings)
+async function pullFromVPS() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    setSyncStatus('syncing');
+    const res = await fetch(`${API_URL}/api/data/${APP_NAME}`, {
+      headers: { 'x-auth-token': token }
+    });
+    if (res.status === 401) { clearToken(); showLoginScreen(); throw new Error('登录过期'); }
+    if (!res.ok) throw new Error('服务器错误: ' + res.status);
+    const result = await res.json();
+    setSyncStatus('synced');
+    return result.data;
+  } catch (e) {
+    if (e.message.includes('Failed to fetch')) setSyncStatus('offline', '无法连接 VPS');
+    else setSyncStatus('error', e.message);
+    console.error('Pull error:', e);
+    return null;
+  }
+}
+
+// 推所有数据
+async function pushToVPS() {
+  const token = getToken();
+  if (!token) return false;
+  try {
+    setSyncStatus('syncing');
+    // 收集所有数据
+    const payload = {
+      expenses: await Data.getAllUnfiltered(),
+      bills: await BillsData.getAll(),
+      games: await GamesData.getAll(),
+      books: await Data.getAllBooks(),
+      currentBookId: currentBookId
+    };
+    const res = await fetch(`${API_URL}/api/data/${APP_NAME}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+      body: JSON.stringify(payload)
+    });
+    if (res.status === 401) { clearToken(); showLoginScreen(); throw new Error('登录过期'); }
+    if (!res.ok) throw new Error('服务器错误: ' + res.status);
+    setSyncStatus('synced');
+    return true;
+  } catch (e) {
+    if (e.message.includes('Failed to fetch')) setSyncStatus('offline', '无法连接 VPS');
+    else setSyncStatus('error', e.message);
+    console.error('Push error:', e);
+    return false;
+  }
+}
+
+let pushTimer = null;
+function schedulePush() {
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushToVPS, 1500);
+}
+
+// 把云端数据写回本地
+async function applyCloudData(cloud) {
+  if (!cloud || typeof cloud !== 'object') return;
+  // 清空本地
+  await new Promise(res => {
+    const tx = db.transaction(['expenses', 'bills', 'games', 'books'], 'readwrite');
+    tx.objectStore('expenses').clear();
+    tx.objectStore('bills').clear();
+    tx.objectStore('games').clear();
+    tx.objectStore('books').clear();
+    tx.oncomplete = () => res();
+  });
+  // 写入云端数据
+  if (Array.isArray(cloud.expenses)) {
+    for (const e of cloud.expenses) {
+      const { id, ...rest } = e;
+      await new Promise(r => {
+        const tx = db.transaction('expenses', 'readwrite');
+        tx.objectStore('expenses').add(rest).onsuccess = () => r();
+      });
+    }
+  }
+  if (Array.isArray(cloud.bills)) {
+    for (const b of cloud.bills) {
+      const { id, ...rest } = b;
+      await BillsData.add(rest);
+    }
+  }
+  if (Array.isArray(cloud.games)) {
+    for (const g of cloud.games) {
+      const { id, ...rest } = g;
+      await GamesData.add(rest);
+    }
+  }
+  if (Array.isArray(cloud.books)) {
+    for (const b of cloud.books) {
+      const { id, ...rest } = b;
+      await new Promise(r => {
+        const tx = db.transaction('books', 'readwrite');
+        tx.objectStore('books').add(rest).onsuccess = () => r();
+      });
+    }
+  }
+  if (cloud.currentBookId) currentBookId = cloud.currentBookId;
+}
+
+// ========== 登录系统 ==========
+function showLoginScreen() {
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  const info = document.getElementById('loginServerInfo');
+  if (info) info.textContent = API_URL.replace(/^https?:\/\//, '');
+  setTimeout(() => document.getElementById('loginPasswordInput').focus(), 100);
+}
+function hideLoginScreen() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+}
+
+async function tryLogin(password) {
+  try {
+    const res = await fetch(`${API_URL}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    if (res.status === 401) return { ok: false, error: '密码错误' };
+    if (!res.ok) return { ok: false, error: '服务器错误: ' + res.status };
+    const result = await res.json();
+    if (!result.token) return { ok: false, error: '没收到 token' };
+    setToken(result.token);
+    return { ok: true };
+  } catch (e) {
+    if (e.message.includes('Failed to fetch')) return { ok: false, error: '无法连接到 VPS' };
+    return { ok: false, error: e.message };
+  }
+}
+
+async function verifyToken() {
+  const token = getToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${API_URL}/api/verify`, { headers: { 'x-auth-token': token } });
+    return res.ok;
+  } catch (e) { return false; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const submitBtn = document.getElementById('loginSubmitBtn');
+  const pwdInput = document.getElementById('loginPasswordInput');
+  const showBtn = document.getElementById('loginShowPwdBtn');
+  const errEl = document.getElementById('loginError');
+  
+  if (showBtn) {
+    showBtn.addEventListener('click', () => {
+      if (pwdInput.type === 'password') { pwdInput.type = 'text'; showBtn.textContent = '🙈'; }
+      else { pwdInput.type = 'password'; showBtn.textContent = '👁️'; }
+    });
+  }
+  
+  async function doLogin() {
+    const pwd = pwdInput.value;
+    if (!pwd) { errEl.textContent = '请输入密码'; errEl.style.display = 'block'; return; }
+    submitBtn.disabled = true;
+    submitBtn.textContent = '登录中...';
+    errEl.style.display = 'none';
+    
+    const result = await tryLogin(pwd);
+    if (!result.ok) {
+      errEl.textContent = '✗ ' + result.error;
+      errEl.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.textContent = '登录';
+      pwdInput.focus(); pwdInput.select();
+      return;
+    }
+    
+    submitBtn.textContent = '正在拉取数据...';
+    hideLoginScreen();
+    const cloud = await pullFromVPS();
+    if (cloud && (Array.isArray(cloud.expenses) || Array.isArray(cloud.bills))) {
+      await applyCloudData(cloud);
+      showToast(`✓ 已从云端拉取数据`);
+    }
+    if (typeof renderAll === 'function') await renderAll();
+    submitBtn.disabled = false;
+    submitBtn.textContent = '登录';
+    pwdInput.value = '';
+  }
+  
+  if (submitBtn) submitBtn.addEventListener('click', doLogin);
+  if (pwdInput) pwdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+});
+
 // ============ DB (IndexedDB) ============
 const DB_NAME = 'myExpenseDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let db;
 
 function openDB() {
@@ -1262,9 +1666,19 @@ function openDB() {
         d.createObjectStore('settings', { keyPath: 'key' });
       }
       
-      // 新建账本表
+      // 账本表
       if (!d.objectStoreNames.contains('books')) {
         d.createObjectStore('books', { keyPath: 'id', autoIncrement: true });
+      }
+      
+      // v3: 计划付款表
+      if (!d.objectStoreNames.contains('bills')) {
+        d.createObjectStore('bills', { keyPath: 'id', autoIncrement: true });
+      }
+      
+      // v3: 游戏活动表
+      if (!d.objectStoreNames.contains('games')) {
+        d.createObjectStore('games', { keyPath: 'id', autoIncrement: true });
       }
     };
     req.onsuccess = (e) => { 
@@ -1420,6 +1834,94 @@ const Data = {
       });
       tx.oncomplete = () => res();
       tx.onerror = rej;
+    });
+  }
+};
+
+// ============ Bills 计划付款 ============
+const BillsData = {
+  add(bill) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('bills', 'readwrite');
+      const r = tx.objectStore('bills').add(bill);
+      r.onsuccess = () => res(r.result);
+      r.onerror = rej;
+    });
+  },
+  update(bill) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('bills', 'readwrite');
+      const r = tx.objectStore('bills').put(bill);
+      r.onsuccess = () => res();
+      r.onerror = rej;
+    });
+  },
+  delete(id) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('bills', 'readwrite');
+      const r = tx.objectStore('bills').delete(id);
+      r.onsuccess = () => res();
+      r.onerror = rej;
+    });
+  },
+  getAll() {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('bills', 'readonly');
+      const r = tx.objectStore('bills').getAll();
+      r.onsuccess = () => res(r.result || []);
+      r.onerror = rej;
+    });
+  },
+  clearAll() {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('bills', 'readwrite');
+      const r = tx.objectStore('bills').clear();
+      r.onsuccess = () => res();
+      r.onerror = rej;
+    });
+  }
+};
+
+// ============ Games 游戏活动 ============
+const GamesData = {
+  add(game) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('games', 'readwrite');
+      const r = tx.objectStore('games').add(game);
+      r.onsuccess = () => res(r.result);
+      r.onerror = rej;
+    });
+  },
+  update(game) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('games', 'readwrite');
+      const r = tx.objectStore('games').put(game);
+      r.onsuccess = () => res();
+      r.onerror = rej;
+    });
+  },
+  delete(id) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('games', 'readwrite');
+      const r = tx.objectStore('games').delete(id);
+      r.onsuccess = () => res();
+      r.onerror = rej;
+    });
+  },
+  getAll() {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('games', 'readonly');
+      const r = tx.objectStore('games').getAll();
+      r.onsuccess = () => res(r.result || []);
+      r.onerror = rej;
+    });
+  },
+  clearAll() {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('games', 'readwrite');
+      const r = tx.objectStore('games').clear();
+      r.onsuccess = () => res();
+      r.onerror = rej;
     });
   }
 };
@@ -2549,6 +3051,490 @@ document.getElementById('bookAddBtn').addEventListener('click', async () => {
   showToast(`✓ 已切换到 ${icon} ${bookName}`);
 });
 
+// ============ Bills 计划付款 业务逻辑 ============
+let editingBillId = null;
+
+const BILL_CATEGORIES = {
+  '居住': '🏠', '教育': '📚', '交通': '🚗', '订阅': '💳',
+  '保险': '🛡️', '贷款': '💰', '其他': '📌'
+};
+
+const CYCLE_LABEL = {
+  monthly: '每月', quarterly: '每季', yearly: '每年',
+  weekly: '每周', once: '一次性'
+};
+
+function addBillPeriod(dateStr, cycle) {
+  const d = new Date(dateStr);
+  if (cycle === 'monthly') d.setMonth(d.getMonth() + 1);
+  else if (cycle === 'quarterly') d.setMonth(d.getMonth() + 3);
+  else if (cycle === 'yearly') d.setFullYear(d.getFullYear() + 1);
+  else if (cycle === 'weekly') d.setDate(d.getDate() + 7);
+  return d.toISOString().slice(0, 10);
+}
+
+function daysUntil(dateStr) {
+  const due = new Date(dateStr + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((due - today) / 86400000);
+}
+
+async function renderBillsList() {
+  const bills = await BillsData.getAll();
+  const cont = document.getElementById('billsList');
+  const empty = document.getElementById('billsEmpty');
+  if (!cont) return;
+  
+  if (bills.length === 0) {
+    cont.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  
+  // 按到期日排序(最近的在前)
+  bills.sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+  
+  cont.innerHTML = bills.map(b => {
+    const days = b.dueDate ? daysUntil(b.dueDate) : null;
+    let urgency = '#10b981', urgencyText = '';
+    if (days !== null) {
+      if (days < 0) { urgency = '#ef4444'; urgencyText = `⚠ 逾期 ${-days} 天`; }
+      else if (days === 0) { urgency = '#ef4444'; urgencyText = '⚠ 今天到期'; }
+      else if (days <= 3) { urgency = '#f59e0b'; urgencyText = `⏰ ${days} 天后`; }
+      else if (days <= 7) { urgency = '#f59e0b'; urgencyText = `${days} 天后`; }
+      else { urgencyText = `${days} 天后`; }
+    }
+    const icon = BILL_CATEGORIES[b.category] || '📌';
+    return `
+      <div class="bill-card" data-id="${b.id}" style="background: white; border: 1px solid #e2e8f0; border-left: 4px solid ${urgency}; border-radius: 10px; padding: 12px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 2px;">${icon} ${escapeHtml(b.name)}</div>
+            <div style="font-size: 11px; color: #94a3b8;">${CYCLE_LABEL[b.cycle] || b.cycle} · ${b.dueDate || '未设到期日'}</div>
+            ${b.note ? `<div style="font-size: 11px; color: #64748b; margin-top: 4px; font-style: italic;">${escapeHtml(b.note)}</div>` : ''}
+          </div>
+          <div style="text-align: right;">
+            <div style="font-weight: 700; font-size: 16px; color: #0f172a;">RM ${(b.amount || 0).toFixed(2)}</div>
+            <div style="font-size: 10px; color: ${urgency}; font-weight: 600; margin-top: 2px;">${urgencyText}</div>
+          </div>
+        </div>
+        ${b.cycle !== 'once' ? `<button class="bill-paid-btn" data-id="${b.id}" style="margin-top: 10px; width: 100%; background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">✓ 已付,推到下个周期</button>` : ''}
+      </div>
+    `;
+  }).join('');
+  
+  cont.querySelectorAll('.bill-card').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.bill-paid-btn')) return;
+      const id = parseInt(el.dataset.id);
+      openBillModal(id);
+    });
+  });
+  
+  cont.querySelectorAll('.bill-paid-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.id);
+      const all = await BillsData.getAll();
+      const bill = all.find(x => x.id === id);
+      if (!bill) return;
+      
+      // 把这次付款记到 expenses (可选)
+      if (currentBookId && confirm(`确认付款 RM ${bill.amount.toFixed(2)}?\n会自动添加到流水。`)) {
+        const today = todayStr();
+        await Data.add({
+          date: today,
+          amount: bill.amount,
+          category: bill.category,
+          note: `[账单] ${bill.name}`,
+          bookId: currentBookId
+        });
+        // 推到下个周期
+        bill.dueDate = addBillPeriod(bill.dueDate || today, bill.cycle);
+        bill.lastPaidDate = today;
+        await BillsData.update(bill);
+        showToast(`✓ 已付,下次 ${bill.dueDate}`);
+        await renderBillsList();
+        await renderRemindersBanner();
+        if (typeof renderRecords === 'function') await renderRecords();
+        schedulePush();
+      }
+    });
+  });
+}
+
+function openBillModal(id = null) {
+  editingBillId = id;
+  document.getElementById('billModalTitle').textContent = id ? '编辑账单' : '添加账单';
+  document.getElementById('billDeleteBtn').style.display = id ? '' : 'none';
+  
+  if (id) {
+    BillsData.getAll().then(all => {
+      const b = all.find(x => x.id === id);
+      if (!b) return;
+      document.getElementById('billName').value = b.name || '';
+      document.getElementById('billAmount').value = b.amount || '';
+      document.getElementById('billCycle').value = b.cycle || 'monthly';
+      document.getElementById('billDueDate').value = b.dueDate || '';
+      document.getElementById('billCategory').value = b.category || '其他';
+      document.getElementById('billNote').value = b.note || '';
+    });
+  } else {
+    document.getElementById('billName').value = '';
+    document.getElementById('billAmount').value = '';
+    document.getElementById('billCycle').value = 'monthly';
+    document.getElementById('billDueDate').value = todayStr();
+    document.getElementById('billCategory').value = '其他';
+    document.getElementById('billNote').value = '';
+  }
+  document.getElementById('billModal').style.display = 'flex';
+}
+
+document.getElementById('addBillBtn').addEventListener('click', () => openBillModal());
+document.getElementById('billCancelBtn').addEventListener('click', () => {
+  document.getElementById('billModal').style.display = 'none';
+});
+
+document.getElementById('billSaveBtn').addEventListener('click', async () => {
+  const name = document.getElementById('billName').value.trim();
+  const amount = parseFloat(document.getElementById('billAmount').value);
+  if (!name) { showToast('请输入名称'); return; }
+  if (isNaN(amount) || amount < 0) { showToast('金额无效'); return; }
+  
+  const bill = {
+    name,
+    amount,
+    cycle: document.getElementById('billCycle').value,
+    dueDate: document.getElementById('billDueDate').value,
+    category: document.getElementById('billCategory').value,
+    note: document.getElementById('billNote').value.trim()
+  };
+  
+  if (editingBillId) {
+    bill.id = editingBillId;
+    await BillsData.update(bill);
+    showToast('✓ 已更新');
+  } else {
+    await BillsData.add(bill);
+    showToast('✓ 已添加');
+  }
+  
+  document.getElementById('billModal').style.display = 'none';
+  await renderBillsList();
+  await renderRemindersBanner();
+  schedulePush();
+});
+
+document.getElementById('billDeleteBtn').addEventListener('click', async () => {
+  if (!editingBillId) return;
+  if (!confirm('删除这条账单?')) return;
+  await BillsData.delete(editingBillId);
+  document.getElementById('billModal').style.display = 'none';
+  showToast('已删除');
+  await renderBillsList();
+  await renderRemindersBanner();
+  schedulePush();
+});
+
+// ============ Games 游戏活动 业务逻辑 ============
+let editingGameId = null;
+const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+// 计算下次发生时间(返回 {date, time, daysUntil, hoursUntil})
+function nextGameOccurrence(game) {
+  const now = new Date();
+  const [hh, mm] = (game.time || '20:00').split(':').map(Number);
+  
+  let next = new Date();
+  next.setHours(hh, mm, 0, 0);
+  
+  if (game.freq === 'daily') {
+    if (next <= now) next.setDate(next.getDate() + 1);
+  } else if (game.freq === 'weekly') {
+    const targetDay = parseInt(game.weekday !== undefined ? game.weekday : 1);
+    const todayDay = now.getDay();
+    let diff = targetDay - todayDay;
+    if (diff < 0 || (diff === 0 && next <= now)) diff += 7;
+    next.setDate(next.getDate() + diff);
+  } else if (game.freq === 'monthly') {
+    const targetDay = parseInt(game.dayOfMonth || 1);
+    next.setDate(targetDay);
+    if (next <= now) {
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(targetDay);
+    }
+  }
+  
+  const diff = next - now;
+  const hoursLeft = Math.floor(diff / 3600000);
+  const daysLeft = Math.floor(hoursLeft / 24);
+  const minutesLeft = Math.floor((diff % 3600000) / 60000);
+  
+  return {
+    when: next,
+    daysLeft,
+    hoursLeft,
+    minutesLeft,
+    label: daysLeft > 0 ? `${daysLeft} 天后` : (hoursLeft > 0 ? `${hoursLeft} 小时后` : `${minutesLeft} 分钟后`)
+  };
+}
+
+async function renderGamesList() {
+  const games = await GamesData.getAll();
+  const cont = document.getElementById('gamesList');
+  const empty = document.getElementById('gamesEmpty');
+  if (!cont) return;
+  
+  if (games.length === 0) {
+    cont.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  
+  // 按下次发生时间排序
+  const enriched = games.map(g => ({ ...g, next: nextGameOccurrence(g) }));
+  enriched.sort((a, b) => a.next.when - b.next.when);
+  
+  cont.innerHTML = enriched.map(g => {
+    const urgent = g.next.hoursLeft < 6;
+    const color = urgent ? '#8b5cf6' : '#94a3b8';
+    let freqDetail = '';
+    if (g.freq === 'daily') freqDetail = `每天 ${g.time}`;
+    else if (g.freq === 'weekly') freqDetail = `${WEEKDAY_LABEL[g.weekday || 1]} ${g.time}`;
+    else if (g.freq === 'monthly') freqDetail = `每月 ${g.dayOfMonth} 号 ${g.time}`;
+    
+    return `
+      <div class="game-card" data-id="${g.id}" style="background: white; border: 1px solid #e2e8f0; border-left: 4px solid ${color}; border-radius: 10px; padding: 12px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 700; font-size: 14px; color: #0f172a;">🎮 ${escapeHtml(g.gameName)}</div>
+            <div style="font-size: 13px; color: #334155; margin-top: 2px;">${escapeHtml(g.eventName)}</div>
+            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">${freqDetail}</div>
+            ${g.note ? `<div style="font-size: 11px; color: #64748b; margin-top: 4px; font-style: italic;">${escapeHtml(g.note)}</div>` : ''}
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 11px; color: ${color}; font-weight: 700;">${g.next.label}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  cont.querySelectorAll('.game-card').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = parseInt(el.dataset.id);
+      openGameModal(id);
+    });
+  });
+}
+
+function openGameModal(id = null) {
+  editingGameId = id;
+  document.getElementById('gameModalTitle').textContent = id ? '编辑游戏活动' : '添加游戏活动';
+  document.getElementById('gameDeleteBtn').style.display = id ? '' : 'none';
+  
+  if (id) {
+    GamesData.getAll().then(all => {
+      const g = all.find(x => x.id === id);
+      if (!g) return;
+      document.getElementById('gameName').value = g.gameName || '';
+      document.getElementById('gameEventName').value = g.eventName || '';
+      document.getElementById('gameFreq').value = g.freq || 'daily';
+      document.getElementById('gameWeekday').value = g.weekday !== undefined ? g.weekday : 1;
+      document.getElementById('gameDayOfMonth').value = g.dayOfMonth || 1;
+      document.getElementById('gameTime').value = g.time || '20:00';
+      document.getElementById('gameNote').value = g.note || '';
+      updateGameFreqUI();
+    });
+  } else {
+    document.getElementById('gameName').value = '';
+    document.getElementById('gameEventName').value = '';
+    document.getElementById('gameFreq').value = 'daily';
+    document.getElementById('gameWeekday').value = 1;
+    document.getElementById('gameDayOfMonth').value = 1;
+    document.getElementById('gameTime').value = '20:00';
+    document.getElementById('gameNote').value = '';
+    updateGameFreqUI();
+  }
+  document.getElementById('gameModal').style.display = 'flex';
+}
+
+function updateGameFreqUI() {
+  const freq = document.getElementById('gameFreq').value;
+  document.getElementById('gameWeekdayBlock').style.display = freq === 'weekly' ? '' : 'none';
+  document.getElementById('gameDayOfMonthBlock').style.display = freq === 'monthly' ? '' : 'none';
+}
+
+document.getElementById('gameFreq').addEventListener('change', updateGameFreqUI);
+document.getElementById('addGameBtn').addEventListener('click', () => openGameModal());
+document.getElementById('gameCancelBtn').addEventListener('click', () => {
+  document.getElementById('gameModal').style.display = 'none';
+});
+
+document.getElementById('gameSaveBtn').addEventListener('click', async () => {
+  const gameName = document.getElementById('gameName').value.trim();
+  const eventName = document.getElementById('gameEventName').value.trim();
+  if (!gameName) { showToast('请输入游戏名'); return; }
+  if (!eventName) { showToast('请输入活动名'); return; }
+  
+  const game = {
+    gameName,
+    eventName,
+    freq: document.getElementById('gameFreq').value,
+    weekday: parseInt(document.getElementById('gameWeekday').value),
+    dayOfMonth: parseInt(document.getElementById('gameDayOfMonth').value),
+    time: document.getElementById('gameTime').value,
+    note: document.getElementById('gameNote').value.trim()
+  };
+  
+  if (editingGameId) {
+    game.id = editingGameId;
+    await GamesData.update(game);
+    showToast('✓ 已更新');
+  } else {
+    await GamesData.add(game);
+    showToast('✓ 已添加');
+  }
+  
+  document.getElementById('gameModal').style.display = 'none';
+  await renderGamesList();
+  await renderRemindersBanner();
+  schedulePush();
+});
+
+document.getElementById('gameDeleteBtn').addEventListener('click', async () => {
+  if (!editingGameId) return;
+  if (!confirm('删除这条活动?')) return;
+  await GamesData.delete(editingGameId);
+  document.getElementById('gameModal').style.display = 'none';
+  showToast('已删除');
+  await renderGamesList();
+  await renderRemindersBanner();
+  schedulePush();
+});
+
+// ============ 集中提醒栏 ============
+async function renderRemindersBanner() {
+  const banner = document.getElementById('remindersBanner');
+  if (!banner) return;
+  
+  const bills = await BillsData.getAll();
+  const games = await GamesData.getAll();
+  
+  const reminders = [];
+  
+  // 7 天内到期的账单
+  for (const b of bills) {
+    if (!b.dueDate) continue;
+    const days = daysUntil(b.dueDate);
+    if (days <= 7) {
+      reminders.push({
+        sortKey: days,
+        priority: days < 0 ? 0 : (days === 0 ? 1 : 2),
+        text: days < 0 ? `⚠ ${b.name} 已逾期 ${-days} 天 (RM ${(b.amount || 0).toFixed(2)})` :
+              days === 0 ? `🔥 ${b.name} 今天到期 (RM ${(b.amount || 0).toFixed(2)})` :
+              `⏰ ${b.name} ${days} 天后到期 (RM ${(b.amount || 0).toFixed(2)})`
+      });
+    }
+  }
+  
+  // 24 小时内的游戏活动
+  for (const g of games) {
+    const next = nextGameOccurrence(g);
+    if (next.hoursLeft < 24) {
+      reminders.push({
+        sortKey: next.hoursLeft / 24,
+        priority: 3,
+        text: `🎮 ${g.gameName} · ${g.eventName} ${next.label}`
+      });
+    }
+  }
+  
+  if (reminders.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+  
+  reminders.sort((a, b) => a.priority - b.priority || a.sortKey - b.sortKey);
+  
+  banner.style.display = 'block';
+  banner.innerHTML = `
+    <div style="font-weight: 700; font-size: 12px; color: #92400e; margin-bottom: 6px;">📌 临近提醒 (${reminders.length})</div>
+    ${reminders.slice(0, 5).map(r => `<div style="font-size: 12px; line-height: 1.7;">${r.text}</div>`).join('')}
+    ${reminders.length > 5 ? `<div style="font-size: 11px; color: #78350f; margin-top: 4px; font-style: italic;">还有 ${reminders.length - 5} 项...</div>` : ''}
+  `;
+}
+
+// ============ 设置页 同步按钮 ============
+document.addEventListener('click', async (e) => {
+  if (e.target.id === 'syncNowBtn') {
+    e.target.disabled = true;
+    e.target.textContent = '⏳ 同步中...';
+    await pushToVPS();
+    const cloud = await pullFromVPS();
+    if (cloud && (Array.isArray(cloud.expenses) || Array.isArray(cloud.bills))) {
+      await applyCloudData(cloud);
+      const savedBookId = await Data.getSetting('currentBookId');
+      const books = await Data.getAllBooks();
+      if (savedBookId && books.find(b => b.id === savedBookId)) currentBookId = savedBookId;
+      else if (books.length > 0) currentBookId = books[0].id;
+      await refreshBookUI();
+      await renderRemindersBanner();
+    }
+    e.target.disabled = false;
+    e.target.textContent = '🔄 立即同步';
+    showToast('✓ 同步完成');
+  }
+  
+  if (e.target.id === 'logoutBtn') {
+    if (!confirm('退出登录?\n\n本地数据保留,但需要重新登录才能同步。')) return;
+    clearToken();
+    showToast('已退出');
+    showLoginScreen();
+  }
+});
+
+// 切换 tab 时刷新各页内容
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', async () => {
+    const tabId = t.dataset.tab;
+    if (tabId === 'bills') await renderBillsList();
+    else if (tabId === 'games') await renderGamesList();
+    else if (tabId === 'settings') {
+      const statusEl = document.getElementById('syncDetailStatus');
+      const lastEl = document.getElementById('syncDetailLast');
+      if (statusEl) {
+        const map = { idle: '空闲', syncing: '同步中', synced: '✓ 已同步', error: '⚠ ' + syncStatus.error, offline: '⚠ 离线' };
+        statusEl.textContent = map[syncStatus.state] || '未知';
+      }
+      if (lastEl) lastEl.textContent = syncStatus.lastSync ? new Date(syncStatus.lastSync).toLocaleString('zh-CN') : '—';
+    }
+  });
+});
+
+// 让 Data 修改后自动同步 (流水添加/删除)
+const _origDataAdd = Data.add.bind(Data);
+Data.add = async function(entry) {
+  const r = await _origDataAdd(entry);
+  schedulePush();
+  return r;
+};
+const _origDataUpdate = Data.update.bind(Data);
+Data.update = async function(entry) {
+  const r = await _origDataUpdate(entry);
+  schedulePush();
+  return r;
+};
+const _origDataDelete = Data.delete.bind(Data);
+Data.delete = async function(id) {
+  const r = await _origDataDelete(id);
+  schedulePush();
+  return r;
+};
+
 // ============ Init ============
 (async () => {
   await openDB();
@@ -2582,6 +3568,25 @@ document.getElementById('bookAddBtn').addEventListener('click', async () => {
   // Service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+  
+  // 验证 token 并拉云端数据
+  const tokenValid = await verifyToken();
+  if (!tokenValid) {
+    showLoginScreen();
+  } else {
+    const cloud = await pullFromVPS();
+    if (cloud && (Array.isArray(cloud.expenses) || Array.isArray(cloud.bills))) {
+      await applyCloudData(cloud);
+      // 重新加载界面
+      const savedBookId = await Data.getSetting('currentBookId');
+      const books2 = await Data.getAllBooks();
+      if (savedBookId && books2.find(b => b.id === savedBookId)) currentBookId = savedBookId;
+      else if (books2.length > 0) currentBookId = books2[0].id;
+      await refreshBookUI();
+    }
+    // 渲染提醒栏
+    await renderRemindersBanner();
   }
 })();
 </script>
