@@ -87,6 +87,28 @@ body {
 .page { display: none; }
 .page.active { display: block; }
 
+/* Filter buttons */
+.filter-btn {
+  padding: 6px 12px; background: var(--bg-2); border: 1px solid var(--line-soft);
+  border-radius: 20px; font-size: 12px; font-weight: 600; color: var(--text-2);
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+  white-space: nowrap;
+}
+.filter-btn:hover { background: var(--bg-3); }
+.filter-btn.active {
+  background: var(--accent-dark); color: white; border-color: var(--accent-dark);
+}
+.filter-btn .count {
+  font-size: 10px; opacity: 0.7; margin-left: 3px;
+}
+
+/* Category tag (in bill rows) */
+.cat-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 8px;
+  font-size: 10px; font-weight: 700; color: white;
+  margin-right: 6px;
+}
+
 /* Month picker */
 .month-picker {
   display: flex; align-items: center; gap: 8px;
@@ -311,9 +333,12 @@ body {
 <div class="container" id="mainApp" style="display: none;">
   
   <div class="header">
-    <div class="header-title"><span class="icon">💰</span>账单管家</div>
-    <div class="sync-indicator" id="syncIndicator">
-      <span class="dot"></span><span id="syncText">已同步</span>
+    <div class="header-title"><span class="icon">💰</span><span id="appTitle">账单管家</span></div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <button id="langBtn" style="background: var(--bg-3); border: 1px solid var(--line); padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; color: var(--text-2); font-family: inherit;">EN</button>
+      <div class="sync-indicator" id="syncIndicator">
+        <span class="dot"></span><span id="syncText">已同步</span>
+      </div>
     </div>
   </div>
   
@@ -335,10 +360,15 @@ body {
       <button class="arrow" id="nextMonthBtn">›</button>
     </div>
     
+    <!-- 分类 filter 按钮 -->
+    <div id="categoryFilters" style="display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; overflow-x: auto;"></div>
+    
     <div class="total-card">
-      <div class="label">本月合计 · this month</div>
+      <div class="label" id="totalLabel">本月合计 · this month</div>
       <div class="amount" id="monthTotal">RM 0.00</div>
       <div class="sub" id="monthTotalSub">还没记账</div>
+      <!-- 分类小计 -->
+      <div id="catBreakdown" style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.25); font-size: 12px; display: none;"></div>
     </div>
     
     <div id="billsList"></div>
@@ -431,13 +461,22 @@ body {
     </div>
     <div class="modal-body">
       <div class="field">
-        <label class="field-label">名称 *</label>
+        <label class="field-label" id="lblTplName">名称 *</label>
         <input type="text" id="tplName" placeholder="例: 岳母带小孩 / 供车 / 贷款">
       </div>
       <div class="field">
-        <label class="field-label">默认金额 (可选)</label>
+        <label class="field-label" id="lblTplCategory">分类 *</label>
+        <select id="tplCategory">
+          <option value="other">其他</option>
+          <option value="life">生活消费</option>
+          <option value="fuel">倒油消费</option>
+          <option value="repair">维修消费</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" id="lblTplDefault">默认金额 (可选)</label>
         <input type="text" inputmode="decimal" id="tplDefault" placeholder="留空,每月手动填">
-        <div class="field-hint">如果固定每月差不多,可以填一个,以后自动带入</div>
+        <div class="field-hint" id="lblTplDefaultHint">如果固定每月差不多,可以填一个,以后自动带入</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -506,10 +545,13 @@ body {
       <div class="field" id="gameWeekdayField">
         <label class="field-label">星期几</label>
         <select id="gameWeekday">
-          <option value="1">星期一</option><option value="2">星期二</option>
-          <option value="3">星期三</option><option value="4">星期四</option>
-          <option value="5">星期五</option><option value="6">星期六</option>
-          <option value="0">星期日</option>
+          <option value="1">1 · 周一</option>
+          <option value="2">2 · 周二</option>
+          <option value="3">3 · 周三</option>
+          <option value="4">4 · 周四</option>
+          <option value="5">5 · 周五</option>
+          <option value="6">6 · 周六</option>
+          <option value="0">7 · 周日</option>
         </select>
       </div>
       <div class="field" id="gameDayOfMonthField">
@@ -540,6 +582,288 @@ body {
 const API_URL = 'https://nick-vps.duckdns.org';
 const APP_NAME = 'expense';
 const STORAGE_TOKEN = 'expense_token';
+const STORAGE_LANG = 'expense_lang';
+
+// ============ 分类 ============
+const CATEGORIES = ['life', 'fuel', 'repair', 'other'];
+const CATEGORY_LABELS = {
+  zh: { life: '生活消费', fuel: '倒油消费', repair: '维修消费', other: '其他' },
+  en: { life: 'Living', fuel: 'Fuel', repair: 'Repair', other: 'Other' }
+};
+const CATEGORY_COLORS = {
+  life: '#6b8e23',
+  fuel: '#e89a3b',
+  repair: '#c4633c',
+  other: '#9c8d75'
+};
+
+// ============ i18n ============
+const I18N = {
+  zh: {
+    appTitle: '账单管家',
+    loginSub: '输入密码访问数据',
+    loginBtn: '登录',
+    loginPlaceholder: '密码',
+    loggingIn: '登录中...',
+    loginSuccess: '✓ 登录成功',
+    pwdEmpty: '请输入密码',
+    pwdWrong: '密码错误',
+    
+    tabBills: '📅 账单',
+    tabHistory: '📊 历史',
+    tabGames: '🎮 游戏',
+    tabSettings: '⚙️ 设置',
+    
+    syncOK: '已同步',
+    syncing: '同步中...',
+    syncError: '同步失败',
+    syncExpired: '登录已过期',
+    
+    monthTotal: '本月合计 · this month',
+    notRecorded: '还没记账',
+    paidStatus: (paid, total) => `已还 ${paid} / ${total} 项`,
+    monthStatus: (paid, total) => `${paid} / ${total} 项已还`,
+    filterAll: '全部',
+    
+    addItem: '+ 加新账单项',
+    copyLastMonth: '↻ 复制上月数据',
+    noTemplates: '还没有账单项',
+    noTemplatesHint: '点 + 加新账单项 添加每月固定要还的项目<br>(例: 岳母 / 供车 / 贷款)',
+    defaultPrefix: '默认',
+    clickToRecord: '点击记账',
+    notPaidYet: '还没还款 · 点击记账',
+    paidPrefix: '已还',
+    
+    addItemTitle: '+ 加新账单项',
+    editItemTitle: '编辑账单项',
+    fieldName: '名称',
+    fieldNamePh: '例: 岳母带小孩 / 供车 / 贷款',
+    fieldCategory: '分类',
+    fieldDefault: '默认金额 (可选)',
+    fieldDefaultPh: '留空,每月手动填',
+    fieldDefaultHint: '如果固定每月差不多,可以填一个,以后自动带入',
+    
+    recordTitle: '记还款',
+    editRecordTitle: '编辑',
+    fieldItem: '账单项',
+    fieldAmount: '金额 (RM)',
+    fieldDate: '还款日期',
+    fieldNote: '备注 (可选)',
+    
+    btnSave: '保存',
+    btnCancel: '取消',
+    btnDelete: '删除',
+    btnDeleteRecord: '删除记录',
+    
+    confirmDeleteTpl: '删除这个账单项? 所有月份的还款记录也会一起删除!',
+    confirmDeleteEntry: '删除这笔还款记录?(账单项保留)',
+    confirmCopyLast: (n, ym) => `从 ${ym} 复制 ${n} 笔到本月? (金额相同,日期改为今天)`,
+    lastMonthEmpty: (ym) => `上月 (${ym}) 没有记录`,
+    allPaid: '本月已经全部记过了',
+    
+    toastAdded: '✓ 已添加',
+    toastUpdated: '✓ 已更新',
+    toastDeleted: '✓ 已删除',
+    toastRecorded: '✓ 已记还款',
+    toastCopied: (n) => `✓ 已复制 ${n} 笔`,
+    toastAmtEmpty: '请输入金额',
+    toastNameEmpty: '请输入名称',
+    
+    histTitle: '最近 12 个月总计',
+    histCompare: '📊 月份对比',
+    histAvg: (n, avg) => `共 ${n} 个月 · 月均 RM ${avg}`,
+    histEmpty: '还没有还款记录',
+    histEmptyHint: '先到 账单 tab 记一笔',
+    
+    gameTitle: '🎮 游戏活动',
+    addGame: '+ 添加',
+    noGames: '还没有游戏活动',
+    noGamesHint: '点 + 添加 加入第一个',
+    gameNext: '下次:',
+    gameFreq: '频率:',
+    gameNote: '备注:',
+    freqDaily: '每天',
+    freqWeekly: '每周',
+    freqMonthly: '每月',
+    addGameTitle: '+ 添加游戏活动',
+    editGameTitle: '编辑游戏活动',
+    fieldGameName: '游戏名',
+    fieldGameNamePh: '例: 王者荣耀',
+    fieldEventName: '活动名',
+    fieldEventNamePh: '例: 每日签到',
+    fieldFreq: '频率',
+    fieldWeekday: '星期几',
+    fieldDayOfMonth: '几号',
+    fieldTime: '时间',
+    confirmDelGame: '确定删除此活动?',
+    
+    settingsTitle: '⚙️ 设置',
+    sectionSync: '☁️ 云同步',
+    sectionData: '📊 数据概览',
+    sectionDataMgmt: '📥 数据管理',
+    sectionAbout: 'ℹ️ 关于',
+    btnSyncNow: '立即同步',
+    btnLogout: '退出登录',
+    btnExport: '📤 导出全部 (JSON)',
+    btnImport: '📥 导入 JSON',
+    statTemplates: '账单项数',
+    statMonths: '记录月份',
+    statGames: '游戏活动数',
+    syncStatus: '状态',
+    vpsLabel: 'VPS',
+    version: '版本',
+    confirmLogout: '确定退出登录?',
+    importOverwrite: (t, e) => `将导入 ${t} 个账单项 + ${e} 笔记录\n\n这会覆盖现有数据,确定吗?`,
+    toastExported: (t, e) => `✓ 已导出 ${t} 项 + ${e} 笔记录`,
+    toastImported: '✓ 已导入',
+    toastImportFail: (m) => '导入失败: ' + m,
+    toastSyncedCloud: '✓ 已从云端同步',
+    sessionExpired: '登录已过期,请重新登录',
+    
+    yearMonth: (y, m) => `${y} 年 ${m} 月`,
+    weekShort: '周',
+    days: '天',
+    hoursLater: (h) => `${h} 小时后`,
+    minutesLater: (m) => `${m} 分钟后`,
+    today: '今天',
+    tomorrow: '明天',
+    daysLater: (d) => `${d} 天后`
+  },
+  en: {
+    appTitle: 'Bills Manager',
+    loginSub: 'Enter password to access',
+    loginBtn: 'Login',
+    loginPlaceholder: 'Password',
+    loggingIn: 'Logging in...',
+    loginSuccess: '✓ Login success',
+    pwdEmpty: 'Please enter password',
+    pwdWrong: 'Wrong password',
+    
+    tabBills: '📅 Bills',
+    tabHistory: '📊 History',
+    tabGames: '🎮 Games',
+    tabSettings: '⚙️ Settings',
+    
+    syncOK: 'Synced',
+    syncing: 'Syncing...',
+    syncError: 'Sync failed',
+    syncExpired: 'Session expired',
+    
+    monthTotal: 'This Month · 本月合计',
+    notRecorded: 'Not recorded yet',
+    paidStatus: (paid, total) => `Paid ${paid} / ${total}`,
+    monthStatus: (paid, total) => `${paid} / ${total} paid`,
+    filterAll: 'All',
+    
+    addItem: '+ Add New Item',
+    copyLastMonth: '↻ Copy Last Month',
+    noTemplates: 'No bill items yet',
+    noTemplatesHint: 'Tap + Add to create monthly bills<br>(e.g. Rent, Car, Loan)',
+    defaultPrefix: 'default',
+    clickToRecord: 'Tap to record',
+    notPaidYet: 'Not paid · Tap to record',
+    paidPrefix: 'Paid',
+    
+    addItemTitle: '+ Add New Item',
+    editItemTitle: 'Edit Item',
+    fieldName: 'Name',
+    fieldNamePh: 'e.g. Rent / Car / Loan',
+    fieldCategory: 'Category',
+    fieldDefault: 'Default Amount (optional)',
+    fieldDefaultPh: 'Leave empty to enter monthly',
+    fieldDefaultHint: 'If amount is similar each month, set it here for auto-fill',
+    
+    recordTitle: 'Record Payment',
+    editRecordTitle: 'Edit',
+    fieldItem: 'Item',
+    fieldAmount: 'Amount (RM)',
+    fieldDate: 'Paid Date',
+    fieldNote: 'Note (optional)',
+    
+    btnSave: 'Save',
+    btnCancel: 'Cancel',
+    btnDelete: 'Delete',
+    btnDeleteRecord: 'Delete Record',
+    
+    confirmDeleteTpl: 'Delete this bill item? All monthly records will be deleted too!',
+    confirmDeleteEntry: 'Delete this payment record? (bill item stays)',
+    confirmCopyLast: (n, ym) => `Copy ${n} entries from ${ym} to this month? (same amounts, today as date)`,
+    lastMonthEmpty: (ym) => `No records in ${ym}`,
+    allPaid: 'All items already recorded this month',
+    
+    toastAdded: '✓ Added',
+    toastUpdated: '✓ Updated',
+    toastDeleted: '✓ Deleted',
+    toastRecorded: '✓ Payment recorded',
+    toastCopied: (n) => `✓ Copied ${n} entries`,
+    toastAmtEmpty: 'Please enter amount',
+    toastNameEmpty: 'Please enter name',
+    
+    histTitle: 'Total Last 12 Months',
+    histCompare: '📊 Monthly Comparison',
+    histAvg: (n, avg) => `${n} months · avg RM ${avg}/mo`,
+    histEmpty: 'No payment records yet',
+    histEmptyHint: 'Go to Bills tab to record',
+    
+    gameTitle: '🎮 Game Events',
+    addGame: '+ Add',
+    noGames: 'No game events yet',
+    noGamesHint: 'Tap + Add to create one',
+    gameNext: 'Next:',
+    gameFreq: 'Frequency:',
+    gameNote: 'Note:',
+    freqDaily: 'Daily',
+    freqWeekly: 'Weekly',
+    freqMonthly: 'Monthly',
+    addGameTitle: '+ Add Game Event',
+    editGameTitle: 'Edit Game Event',
+    fieldGameName: 'Game Name',
+    fieldGameNamePh: 'e.g. Honor of Kings',
+    fieldEventName: 'Event Name',
+    fieldEventNamePh: 'e.g. Daily Check-in',
+    fieldFreq: 'Frequency',
+    fieldWeekday: 'Day of Week',
+    fieldDayOfMonth: 'Day of Month',
+    fieldTime: 'Time',
+    confirmDelGame: 'Delete this event?',
+    
+    settingsTitle: '⚙️ Settings',
+    sectionSync: '☁️ Cloud Sync',
+    sectionData: '📊 Data Overview',
+    sectionDataMgmt: '📥 Data Management',
+    sectionAbout: 'ℹ️ About',
+    btnSyncNow: 'Sync Now',
+    btnLogout: 'Logout',
+    btnExport: '📤 Export All (JSON)',
+    btnImport: '📥 Import JSON',
+    statTemplates: 'Bill Items',
+    statMonths: 'Recorded Months',
+    statGames: 'Game Events',
+    syncStatus: 'Status',
+    vpsLabel: 'VPS',
+    version: 'Version',
+    confirmLogout: 'Confirm logout?',
+    importOverwrite: (t, e) => `Import ${t} items + ${e} records?\n\nThis will overwrite existing data.`,
+    toastExported: (t, e) => `✓ Exported ${t} items + ${e} records`,
+    toastImported: '✓ Imported',
+    toastImportFail: (m) => 'Import failed: ' + m,
+    toastSyncedCloud: '✓ Synced from cloud',
+    sessionExpired: 'Session expired, please login again',
+    
+    yearMonth: (y, m) => `${["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m]} ${y}`,
+    weekShort: 'Day',
+    days: 'd',
+    hoursLater: (h) => `in ${h}h`,
+    minutesLater: (m) => `in ${m}min`,
+    today: 'Today',
+    tomorrow: 'Tomorrow',
+    daysLater: (d) => `${d}d later`
+  }
+};
+
+let currentLang = localStorage.getItem(STORAGE_LANG) || 'zh';
+function T() { return I18N[currentLang]; }
+function CL() { return CATEGORY_LABELS[currentLang]; }
 
 // ============ Utils ============
 function todayStr() {
@@ -569,6 +893,7 @@ function parseMonthKey(key) {
 
 // 当前显示的月份 (year-month, 1-12)
 let viewYear, viewMonth;
+let currentFilter = 'all';  // 'all' | 'life' | 'fuel' | 'repair' | 'other'
 function initCurrentMonth() {
   const d = new Date();
   viewYear = d.getFullYear();
@@ -649,10 +974,122 @@ let pushTimer = null;
 function setSyncStatus(status, text) {
   const el = document.getElementById('syncIndicator');
   el.className = 'sync-indicator ' + (status || '');
-  document.getElementById('syncText').textContent = text || '已同步';
+  const display = text || T().syncOK;
+  document.getElementById('syncText').textContent = display;
   const sst = document.getElementById('syncStatusText');
-  if (sst) sst.textContent = text || '已同步';
+  if (sst) sst.textContent = display;
 }
+
+// ============ 应用语言 ============
+function applyLanguage() {
+  const t = T();
+  // 顶部
+  const ttl = document.getElementById('appTitle');
+  if (ttl) ttl.textContent = t.appTitle;
+  document.getElementById('langBtn').textContent = currentLang === 'zh' ? 'EN' : '中';
+  
+  // 登录页
+  document.querySelector('#loginPage .login-title').textContent = t.appTitle;
+  document.querySelector('#loginPage .login-sub').textContent = t.loginSub;
+  document.getElementById('loginPwd').placeholder = t.loginPlaceholder;
+  document.getElementById('loginBtn').textContent = t.loginBtn;
+  
+  // Tabs
+  document.querySelector('[data-tab="bills"]').textContent = t.tabBills;
+  document.querySelector('[data-tab="history"]').textContent = t.tabHistory;
+  document.querySelector('[data-tab="games"]').textContent = t.tabGames;
+  document.querySelector('[data-tab="settings"]').textContent = t.tabSettings;
+  
+  // 账单页
+  document.getElementById('totalLabel').textContent = t.monthTotal;
+  document.getElementById('addTemplateBtn').textContent = t.addItem;
+  document.getElementById('copyLastMonthBtn').textContent = t.copyLastMonth;
+  
+  // 历史页
+  const ht = document.querySelector('#page-history .total-card .label');
+  if (ht) ht.textContent = t.histTitle;
+  const hc = document.querySelector('#page-history > div:nth-of-type(2)');
+  if (hc) hc.textContent = t.histCompare;
+  
+  // 游戏页
+  document.getElementById('addGameBtn').textContent = t.addGame;
+  
+  // 设置页
+  document.querySelector('#page-settings .settings-section:nth-of-type(1) h3').textContent = t.sectionSync;
+  document.querySelector('#page-settings .settings-section:nth-of-type(2) h3').textContent = t.sectionData;
+  document.querySelector('#page-settings .settings-section:nth-of-type(3) h3').textContent = t.sectionDataMgmt;
+  document.querySelector('#page-settings .settings-section:nth-of-type(4) h3').textContent = t.sectionAbout;
+  document.getElementById('manualSyncBtn').textContent = t.btnSyncNow;
+  document.getElementById('logoutBtn').textContent = t.btnLogout;
+  document.getElementById('exportDataBtn').textContent = t.btnExport;
+  document.getElementById('importDataBtn').textContent = t.btnImport;
+  
+  // 设置页 row labels
+  const rows = document.querySelectorAll('#page-settings .settings-row .label');
+  if (rows[0]) rows[0].textContent = t.syncStatus;
+  if (rows[1]) rows[1].textContent = t.vpsLabel;
+  if (rows[2]) rows[2].textContent = t.statTemplates;
+  if (rows[3]) rows[3].textContent = t.statMonths;
+  if (rows[4]) rows[4].textContent = t.statGames;
+  if (rows[5]) rows[5].textContent = t.version;
+  
+  // 账单项编辑框
+  const lblTplName = document.getElementById('lblTplName');
+  if (lblTplName) lblTplName.textContent = t.fieldName + ' *';
+  const lblTplCat = document.getElementById('lblTplCategory');
+  if (lblTplCat) lblTplCat.textContent = t.fieldCategory + ' *';
+  const lblTplDef = document.getElementById('lblTplDefault');
+  if (lblTplDef) lblTplDef.textContent = t.fieldDefault;
+  const lblTplDefHint = document.getElementById('lblTplDefaultHint');
+  if (lblTplDefHint) lblTplDefHint.textContent = t.fieldDefaultHint;
+  document.getElementById('tplName').placeholder = t.fieldNamePh;
+  document.getElementById('tplDefault').placeholder = t.fieldDefaultPh;
+  
+  // 分类下拉框选项
+  const tplCat = document.getElementById('tplCategory');
+  if (tplCat) {
+    tplCat.querySelectorAll('option').forEach(opt => {
+      const v = opt.value;
+      if (CL()[v]) opt.textContent = CL()[v];
+    });
+  }
+  
+  // 还款记录编辑框
+  document.querySelectorAll('#entryModal .field-label').forEach((lbl, i) => {
+    const labels = [t.fieldItem, t.fieldAmount + ' *', t.fieldDate, t.fieldNote];
+    if (labels[i]) lbl.textContent = labels[i];
+  });
+  
+  // 游戏编辑框
+  document.querySelectorAll('#gameModal .field-label').forEach((lbl, i) => {
+    const labels = [t.fieldGameName + ' *', t.fieldEventName + ' *', t.fieldFreq, t.fieldWeekday, t.fieldDayOfMonth, t.fieldTime, t.fieldNote];
+    if (labels[i]) lbl.textContent = labels[i];
+  });
+  
+  // 游戏频率下拉
+  const gf = document.getElementById('gameFreq');
+  if (gf && gf.options.length === 3) {
+    gf.options[0].textContent = t.freqDaily;
+    gf.options[1].textContent = t.freqWeekly;
+    gf.options[2].textContent = t.freqMonthly;
+  }
+  
+  // 通用按钮文字 (所有 modal)
+  document.querySelectorAll('[id$="CancelBtn"]').forEach(b => { if (b.id !== 'paidCancelBtn') b.textContent = t.btnCancel; });
+  document.querySelectorAll('[id$="SaveBtn"]').forEach(b => b.textContent = t.btnSave);
+  
+  // 设置页 version
+  const verRow = document.querySelector('#page-settings .settings-section:last-child .value');
+  if (verRow) verRow.textContent = 'v5.0 · ' + (currentLang === 'zh' ? '中文版' : 'English');
+}
+
+document.getElementById('langBtn').addEventListener('click', async () => {
+  currentLang = currentLang === 'zh' ? 'en' : 'zh';
+  localStorage.setItem(STORAGE_LANG, currentLang);
+  document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+  applyLanguage();
+  await renderAll();
+});
 
 async function pullFromVPS() {
   const token = localStorage.getItem(STORAGE_TOKEN);
@@ -835,57 +1272,132 @@ document.getElementById('nextMonthBtn').addEventListener('click', () => {
 // ============ 账单渲染 ============
 async function renderBills() {
   // 更新月份显示
-  document.getElementById('currentMonthLabel').textContent = `${viewYear} 年 ${viewMonth} 月`;
+  document.getElementById('currentMonthLabel').textContent = T().yearMonth(viewYear, viewMonth);
   
   const templates = await Store.getAll('templates');
   const allEntries = await Store.getAll('entries');
   const monthEntries = allEntries.filter(e => e.year === viewYear && e.month === viewMonth);
   
+  // 计算每个分类的小计 (基于所有 templates,不过滤)
+  const catTotals = { life: 0, fuel: 0, repair: 0, other: 0 };
+  const catCounts = { life: 0, fuel: 0, repair: 0, other: 0 };
+  const catTplCounts = { life: 0, fuel: 0, repair: 0, other: 0 };
+  
+  for (const tpl of templates) {
+    const cat = CATEGORIES.includes(tpl.category) ? tpl.category : 'other';
+    catTplCounts[cat]++;
+    const entry = monthEntries.find(e => e.templateId === tpl.id);
+    if (entry) {
+      catTotals[cat] += parseFloat(entry.amount) || 0;
+      catCounts[cat]++;
+    }
+  }
+  
+  const grandTotal = catTotals.life + catTotals.fuel + catTotals.repair + catTotals.other;
+  const totalPaid = catCounts.life + catCounts.fuel + catCounts.repair + catCounts.other;
+  
+  // 渲染 filter 按钮
+  renderFilterButtons(templates, catTplCounts);
+  
   if (templates.length === 0) {
     document.getElementById('billsList').innerHTML = `<div class="empty-state">
       <div class="icon">📅</div>
-      <div class="title">还没有账单项</div>
-      <div class="hint">点 + 加新账单项 添加每月固定要还的项目<br>(例: 岳母 / 供车 / 贷款)</div>
+      <div class="title">${T().noTemplates}</div>
+      <div class="hint">${T().noTemplatesHint}</div>
     </div>`;
     document.getElementById('monthTotal').textContent = 'RM 0.00';
-    document.getElementById('monthTotalSub').textContent = '还没记账';
-    document.getElementById('currentMonthStat').textContent = '0 项';
+    document.getElementById('monthTotalSub').textContent = T().notRecorded;
+    document.getElementById('currentMonthStat').textContent = T().monthStatus(0, 0);
+    document.getElementById('catBreakdown').style.display = 'none';
     return;
   }
   
   // 按 createdAt 排序模板
   templates.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   
-  let total = 0;
-  let paidCount = 0;
+  // 按 filter 过滤要显示的 templates
+  const visibleTemplates = currentFilter === 'all' ? templates : templates.filter(t => (t.category || 'other') === currentFilter);
   
-  document.getElementById('billsList').innerHTML = templates.map(tpl => {
+  // 渲染分类小计 (只在"全部"时显示)
+  if (currentFilter === 'all') {
+    const breakdown = document.getElementById('catBreakdown');
+    const items = [];
+    for (const cat of CATEGORIES) {
+      if (catTplCounts[cat] > 0) {
+        items.push(`<div style="display: flex; justify-content: space-between; padding: 3px 0;">
+          <span>${CL()[cat]}:</span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600;">RM ${catTotals[cat].toFixed(2)} <span style="opacity: 0.7;">(${catCounts[cat]}/${catTplCounts[cat]})</span></span>
+        </div>`);
+      }
+    }
+    breakdown.innerHTML = items.join('');
+    breakdown.style.display = items.length > 1 ? 'block' : 'none';
+  } else {
+    document.getElementById('catBreakdown').style.display = 'none';
+  }
+  
+  // 渲染账单列表
+  document.getElementById('billsList').innerHTML = visibleTemplates.map(tpl => {
+    const cat = CATEGORIES.includes(tpl.category) ? tpl.category : 'other';
     const entry = monthEntries.find(e => e.templateId === tpl.id);
     const paid = !!entry;
-    if (paid) {
-      total += parseFloat(entry.amount) || 0;
-      paidCount++;
-    }
+    const catTag = `<span class="cat-tag" style="background: ${CATEGORY_COLORS[cat]};">${CL()[cat]}</span>`;
     return `
       <div class="bill-row ${paid ? 'paid' : 'unpaid'}">
         <div class="bill-check ${paid ? 'checked' : ''}" onclick="toggleEntry('${tpl.id}')">${paid ? '✓' : ''}</div>
         <div class="bill-info" onclick="${paid ? `editEntry('${entry.id}')` : `toggleEntry('${tpl.id}')`}">
           <div class="bill-name">${escapeHtml(tpl.name)}</div>
           <div class="bill-meta">
-            ${paid ? `${entry.paidDate || '已还'}${entry.note ? ' · <span class="note">' + escapeHtml(entry.note) + '</span>' : ''}` : (tpl.defaultAmount ? `默认 RM ${parseFloat(tpl.defaultAmount).toFixed(2)} · 点击记账` : '还没还款 · 点击记账')}
+            ${catTag}${paid ? `${entry.paidDate || T().paidPrefix}${entry.note ? ' · <span class="note">' + escapeHtml(entry.note) + '</span>' : ''}` : (tpl.defaultAmount ? `${T().defaultPrefix} RM ${parseFloat(tpl.defaultAmount).toFixed(2)} · ${T().clickToRecord}` : T().notPaidYet)}
           </div>
         </div>
         <div class="bill-amount">${paid ? 'RM ' + (parseFloat(entry.amount) || 0).toFixed(2) : (tpl.defaultAmount ? '~RM ' + parseFloat(tpl.defaultAmount).toFixed(2) : '—')}</div>
         <div class="bill-actions">
-          <button class="btn-icon" onclick="editTemplate('${tpl.id}')" title="编辑账单项">⚙️</button>
+          <button class="btn-icon" onclick="editTemplate('${tpl.id}')">⚙️</button>
         </div>
       </div>
     `;
   }).join('');
   
-  document.getElementById('monthTotal').textContent = `RM ${total.toFixed(2)}`;
-  document.getElementById('monthTotalSub').textContent = `已还 ${paidCount} / ${templates.length} 项`;
-  document.getElementById('currentMonthStat').textContent = `${paidCount} / ${templates.length} 项已还`;
+  // 更新顶部总额 (按当前 filter)
+  let displayTotal, displayPaid, displayMax;
+  if (currentFilter === 'all') {
+    displayTotal = grandTotal;
+    displayPaid = totalPaid;
+    displayMax = templates.length;
+  } else {
+    displayTotal = catTotals[currentFilter];
+    displayPaid = catCounts[currentFilter];
+    displayMax = catTplCounts[currentFilter];
+  }
+  
+  document.getElementById('monthTotal').textContent = `RM ${displayTotal.toFixed(2)}`;
+  document.getElementById('monthTotalSub').textContent = T().paidStatus(displayPaid, displayMax);
+  document.getElementById('currentMonthStat').textContent = T().monthStatus(totalPaid, templates.length);
+}
+
+function renderFilterButtons(templates, catTplCounts) {
+  const el = document.getElementById('categoryFilters');
+  const t = T();
+  const cl = CL();
+  
+  const buttons = [
+    `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">${t.filterAll}<span class="count">(${templates.length})</span></button>`
+  ];
+  for (const cat of CATEGORIES) {
+    if (catTplCounts[cat] > 0) {
+      buttons.push(`<button class="filter-btn ${currentFilter === cat ? 'active' : ''}" data-filter="${cat}">${cl[cat]}<span class="count">(${catTplCounts[cat]})</span></button>`);
+    }
+  }
+  el.innerHTML = buttons.join('');
+  
+  // 绑定点击
+  el.querySelectorAll('.filter-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      currentFilter = b.dataset.filter;
+      renderBills();
+    });
+  });
 }
 
 // 切换还款状态: 没记 -> 弹模态框记 | 已记 -> 编辑
@@ -983,8 +1495,9 @@ let editingTplId = null;
 
 document.getElementById('addTemplateBtn').addEventListener('click', () => {
   editingTplId = null;
-  document.getElementById('templateModalTitle').textContent = '+ 加新账单项';
+  document.getElementById('templateModalTitle').textContent = T().addItemTitle;
   document.getElementById('tplName').value = '';
+  document.getElementById('tplCategory').value = 'other';
   document.getElementById('tplDefault').value = '';
   document.getElementById('tplDeleteBtn').classList.add('hidden');
   document.getElementById('templateModal').classList.add('show');
@@ -995,8 +1508,9 @@ window.editTemplate = async function(id) {
   const tpl = templates.find(t => t.id === id);
   if (!tpl) return;
   editingTplId = id;
-  document.getElementById('templateModalTitle').textContent = '编辑账单项';
+  document.getElementById('templateModalTitle').textContent = T().editItemTitle;
   document.getElementById('tplName').value = tpl.name || '';
+  document.getElementById('tplCategory').value = CATEGORIES.includes(tpl.category) ? tpl.category : 'other';
   document.getElementById('tplDefault').value = tpl.defaultAmount || '';
   document.getElementById('tplDeleteBtn').classList.remove('hidden');
   document.getElementById('templateModal').classList.add('show');
@@ -1008,12 +1522,14 @@ document.getElementById('tplCancelBtn').addEventListener('click', () => {
 
 document.getElementById('tplSaveBtn').addEventListener('click', async () => {
   const name = document.getElementById('tplName').value.trim();
+  const category = document.getElementById('tplCategory').value;
   const defaultAmount = parseFloat(document.getElementById('tplDefault').value) || null;
-  if (!name) { showToast('请输入名称'); return; }
+  if (!name) { showToast(T().toastNameEmpty); return; }
   
   const tpl = {
     id: editingTplId || uuid(),
     name,
+    category: CATEGORIES.includes(category) ? category : 'other',
     defaultAmount,
     createdAt: editingTplId ? undefined : Date.now(),
     updatedAt: Date.now()
@@ -1027,7 +1543,7 @@ document.getElementById('tplSaveBtn').addEventListener('click', async () => {
   document.getElementById('templateModal').classList.remove('show');
   await renderAll();
   debouncePush();
-  showToast(editingTplId ? '✓ 已更新' : '✓ 已添加');
+  showToast(editingTplId ? T().toastUpdated : T().toastAdded);
 });
 
 document.getElementById('tplDeleteBtn').addEventListener('click', async () => {
@@ -1202,15 +1718,39 @@ async function renderGames() {
     </div>`;
     return;
   }
+  // 排序: 每周活动按 周一(1) → 周日(7) 顺序; 每日/每月按下次发生时间
+  const weekdayOrder = (g) => {
+    if (g.freq !== 'weekly') return 99;
+    const w = parseInt(g.weekday);
+    // 数据中 1-6 = 一到六, 0 = 周日
+    // 把 0 (周日) 转换为 7,让周一(1)排第一,周日(7)排最后
+    return w === 0 ? 7 : w;
+  };
+  
   const enriched = games.map(g => ({ ...g, next: nextGameOccurrence(g) }));
-  enriched.sort((a, b) => (a.next || 9e15) - (b.next || 9e15));
+  enriched.sort((a, b) => {
+    // 每周活动排在最前面,按 1-7 排
+    if (a.freq === 'weekly' && b.freq === 'weekly') {
+      const wa = weekdayOrder(a), wb = weekdayOrder(b);
+      if (wa !== wb) return wa - wb;
+      // 同一天: 按时间排
+      return (a.time || '00:00').localeCompare(b.time || '00:00');
+    }
+    if (a.freq === 'weekly') return -1;
+    if (b.freq === 'weekly') return 1;
+    // 都不是每周: 按下次发生时间排
+    return (a.next || 9e15) - (b.next || 9e15);
+  });
+  
   list.innerHTML = enriched.map(g => {
     const hoursLeft = g.next ? (g.next - Date.now()) / (60*60*1000) : 999;
     const isSoon = hoursLeft < 6;
+    // 每周显示 "周 1" / "周 7", 显示星期数字
+    const weekdayLabel = g.freq === 'weekly' ? `周 ${weekdayOrder(g)}` : '';
     return `
       <div class="card" style="${isSoon ? 'border-color: var(--accent-2); background: linear-gradient(135deg, #fff8e8, var(--bg-2));' : ''}">
         <div class="card-head">
-          <div class="card-name">${escapeHtml(g.gameName)} · ${escapeHtml(g.eventName)}</div>
+          <div class="card-name">${weekdayLabel ? `<span style="background: var(--accent); color: white; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; margin-right: 6px;">${weekdayLabel}</span>` : ''}${escapeHtml(g.gameName)} · ${escapeHtml(g.eventName)}</div>
         </div>
         <div class="card-meta">
           <div><span class="label">下次:</span> <span class="value" style="${isSoon ? 'color: var(--accent-2); font-weight: 700;' : ''}">${formatGameNext(g.next)}</span></div>
@@ -1397,6 +1937,7 @@ async function init() {
 
 (async () => {
   try {
+    applyLanguage();  // 第一时间应用语言
     const token = localStorage.getItem(STORAGE_TOKEN);
     if (!token) {
       showLoginPage();
